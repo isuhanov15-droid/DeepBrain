@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="DeepBrain.Studio.MainWindow"
+        Width="900" Height="600"
+        Title="DeepBrain Studio">
+	<DockPanel Margin="12">
+		<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
+			<TextBox Name="HostBox" Width="160" Text="127.0.0.1"/>
+			<TextBox Name="PortBox" Width="80" Text="5555"/>
+			<Button Name="ConnectBtn" Content="Connect"/>
+			<Button Name="PingBtn" Content="Ping"/>
+			<Button Name="SubLogsBtn" Content="Subscribe Logs"/>
+			<Button Name="ClearBtn" Content="Clear"/>
+			<TextBlock Name="StatusText" Margin="12,0,0,0"/>
+		</StackPanel>
+
+		<Border Margin="0,12,0,0" BorderThickness="1" Padding="8">
+			<ScrollViewer>
+				<ItemsControl Name="LogsList"/>
+			</ScrollViewer>
+		</Border>
+	</DockPanel>
+</Window>

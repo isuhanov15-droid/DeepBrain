@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/DeepBrain.Host/DeepBrain.Host.csproj" />
+  <Project Path="src/DeepBrain.Shared/DeepBrain.Shared.csproj" />
+  <Project Path="src/DeepBrain.Studio/DeepBrain.Studio.csproj" />
+</Solution>
