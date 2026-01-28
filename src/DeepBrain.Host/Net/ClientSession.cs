@@ -11,6 +11,7 @@ public sealed class ClientSession : IAsyncDisposable
 
     public string Remote => _client.Client.RemoteEndPoint?.ToString() ?? "unknown";
     public bool WantsLogs { get; private set; }
+    public bool WantsState { get; private set; }
 
     public ClientSession(TcpClient client)
     {
@@ -60,6 +61,21 @@ public sealed class ClientSession : IAsyncDisposable
                 await SendAsync(new Envelope(Msg.LogAppend, Guid.NewGuid().ToString("N"), NowMs(),
                     new { text = $"[{DateTime.Now:HH:mm:ss}] logs subscribed ✅" }), ct);
                 break;
+            case Msg.BrainStateSubscribe:
+                WantsState = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] state subscribed 🧠", ct);
+                break;
+
+            case Msg.BrainStart:
+                await onInfo($"BrainStart from {Remote}");
+                // тут пока просто логируем, позже привяжем к BrainLoop
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.start ✅", ct);
+                break;
+
+            case Msg.BrainStop:
+                await onInfo($"BrainStop from {Remote}");
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.stop 🛑", ct);
+                break;
 
             default:
                 await onInfo($"Unknown msg from {Remote}: {env.Type}");
@@ -89,6 +105,11 @@ public sealed class ClientSession : IAsyncDisposable
         _cts.Dispose();
         await Task.CompletedTask;
     }
+public async Task SendStateAsync(object payload, CancellationToken ct)
+{
+    if (!WantsState) return;
+    await SendAsync(new Envelope(Msg.BrainState, Guid.NewGuid().ToString("N"), NowMs(), payload), ct);
+}
 
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }

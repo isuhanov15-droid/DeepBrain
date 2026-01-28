@@ -1,4 +1,7 @@
-﻿using System.Net.Sockets;
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Net.Sockets;
 using DeepBrain.Shared.Net;
 using System.Text.Json;
 
@@ -14,6 +17,7 @@ public sealed class TcpClientService : IAsyncDisposable
 
     public event Action<string>? OnLog;
     public event Action<string>? OnInfo;
+    public event Action<long, long, string, string>? OnState;
 
     public async Task ConnectAsync(string host, int port)
     {
@@ -67,27 +71,41 @@ public sealed class TcpClientService : IAsyncDisposable
         }
     }
 
-   
 
-private void HandleIncoming(Envelope env)
-{
-    switch (env.Type)
+
+    private void HandleIncoming(Envelope env)
     {
-        case Msg.LogAppend:
-            if (env.Payload is JsonElement je && je.TryGetProperty("text", out var t))
-                OnLog?.Invoke(t.GetString() ?? "");
-            else
-                OnLog?.Invoke(env.Payload?.ToString() ?? "(log)");
-            break;
+        switch (env.Type)
+        {
+            case Msg.LogAppend:
+                if (env.Payload is JsonElement je && je.TryGetProperty("text", out var t))
+                    OnLog?.Invoke(t.GetString() ?? "");
+                else
+                    OnLog?.Invoke(env.Payload?.ToString() ?? "(log)");
+                break;
 
-        case Msg.Pong:
-            OnInfo?.Invoke("pong ✅");
-            break;
+            case Msg.Pong:
+                OnInfo?.Invoke("pong ✅");
+                break;
+
+
+            case Msg.BrainState:
+                
+                if (env.Payload is JsonElement s)
+                {
+                    long tick = s.TryGetProperty("tick", out var tickEl) ? tickEl.GetInt64() : 0;
+                    long uptime = s.TryGetProperty("uptimeMs", out var u) ? u.GetInt64() : 0;
+                    string mode = s.TryGetProperty("mode", out var m) ? (m.GetString() ?? "") : "";
+                    string decision = s.TryGetProperty("lastDecision", out var d) ? (d.GetString() ?? "") : "";
+                    OnState?.Invoke(tick, uptime, mode, decision);
+                }
+                break;
+
+        }
     }
-}
 
 
-private async Task SendAsync(Envelope env, CancellationToken ct)
+    private async Task SendAsync(Envelope env, CancellationToken ct)
     {
         if (_stream is null) return;
         var bytes = JsonWire.Serialize(env);
@@ -107,6 +125,14 @@ private async Task SendAsync(Envelope env, CancellationToken ct)
         await DisconnectAsync();
         _cts?.Dispose();
     }
+    public async Task SubscribeStateAsync()
+    {
+        if (_stream is null) return;
+
+        var env = new Envelope(Msg.BrainStateSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
+        await SendAsync(env, _cts?.Token ?? CancellationToken.None);
+    }
+
 
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }

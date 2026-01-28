@@ -10,10 +10,12 @@
 			<Button Name="ConnectBtn" Content="Connect"/>
 			<Button Name="PingBtn" Content="Ping"/>
 			<Button Name="SubLogsBtn" Content="Subscribe Logs"/>
+			<Button Name="SubStateBtn" Content="Subscribe State"/>
+
 			<Button Name="ClearBtn" Content="Clear"/>
 			<TextBlock Name="StatusText" Margin="12,0,0,0"/>
 		</StackPanel>
-
+		<TextBlock Name="BrainStateText" Margin="0,6,0,0"/>
 		<Border Margin="0,12,0,0" BorderThickness="1" Padding="8">
 			<ScrollViewer>
 				<ItemsControl Name="LogsList"/>

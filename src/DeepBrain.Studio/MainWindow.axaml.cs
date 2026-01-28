@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -28,13 +29,20 @@ public partial class MainWindow : Window
 
         PingBtn.Click += async (_, _) => await _tcp.PingAsync();
         SubLogsBtn.Click += async (_, _) => await _tcp.SubscribeLogsAsync();
-
+        SubStateBtn.Click += async (_, _) => await _tcp.SubscribeStateAsync();
         ClearBtn.Click += (_, _) => _logs.Clear();
+        _tcp.OnState += (tick, uptime, mode, decision) => Ui(() =>
+{
+    BrainStateText.Text = $"tick={tick}  uptime={uptime}ms  mode={mode}  decision={decision}";
+});
+
+        
+
     }
 
     private void AddLog(string text)
     {
-        // кольцевой буфер, чтобы UI не умер
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ UI пїЅпїЅ пїЅпїЅпїЅпїЅ
         if (_logs.Count > 2000) _logs.RemoveAt(0);
         _logs.Add(text);
     }

@@ -1,3 +1,9 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+
+
 using System.Net;
 using System.Net.Sockets;
 
@@ -53,7 +59,7 @@ public sealed class TcpBrainServer : IAsyncDisposable
         foreach (var c in snapshot)
         {
             try { await c.SendLogAsync(text, ct); }
-            catch { /* клиент может отвалиться, не драматизируем */ }
+            catch { /* пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ */ }
         }
     }
 
@@ -68,4 +74,16 @@ public sealed class TcpBrainServer : IAsyncDisposable
             try { c.Stop(); await c.DisposeAsync(); } catch { }
         }
     }
+    public async Task BroadcastStateAsync(object payload, CancellationToken ct)
+    {
+        List<ClientSession> snapshot;
+        lock (_lock) snapshot = _clients.ToList();
+
+        foreach (var c in snapshot)
+        {
+            try { await c.SendStateAsync(payload, ct); }
+            catch { }
+        }
+    }
+
 }
