@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Net.Sockets;
 using DeepBrain.Shared.Net;
+using DeepBrain.Shared.Input;
 using System.Text.Json;
 
 namespace DeepBrain.Studio.Net;
@@ -157,6 +158,11 @@ public sealed class TcpClientService : IAsyncDisposable
         await SendAsync(env, _cts?.Token ?? CancellationToken.None);
     }
 
+public async Task SetInputAsync(BrainInputDto input)
+{
+    var env = new Envelope(Msg.InputSet, Guid.NewGuid().ToString("N"), NowMs(), input);
+    await SendAsync(env, _cts?.Token ?? CancellationToken.None);
+}
 
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }

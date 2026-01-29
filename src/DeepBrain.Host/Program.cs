@@ -10,8 +10,10 @@ var server = new TcpBrainServer(
     port: 5555,
     onBrainStart: () => { brain.Start(); return Task.CompletedTask; },
     onBrainStop:  () => { brain.Stop();  return Task.CompletedTask; },
-    onBrainStep:  () => { brain.Step(isForced: true); return Task.CompletedTask; }
+    onBrainStep:  () => { brain.Step(isForced: true); return Task.CompletedTask; },
+    onInputSet:   dto => { brain.SetInput(dto); return Task.CompletedTask; }
 );
+
 
 server.Start();
 

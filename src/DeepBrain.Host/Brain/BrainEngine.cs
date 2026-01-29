@@ -22,6 +22,13 @@ public sealed class BrainEngine
     private readonly PolicyEngine _policy = new();
     private readonly Actuator _actuator = new();
 
+    private readonly DeepBrain.Host.Brain.Input.InputStore _inputs = new();
+    public DeepBrain.Shared.Input.BrainInputDto GetInputSnapshot() => _inputs.GetSnapshot();
+    public void SetInput(DeepBrain.Shared.Input.BrainInputDto input) => _inputs.Set(input);
+    public void PatchInput(float? stress = null, float? energy = null, float? focus = null, string? goal = null, string? command = null)
+        => _inputs.Patch(stress, energy, focus, goal, command);
+
+
     public bool IsRunning => _isRunning;
 
     public void Start()
@@ -65,20 +72,32 @@ public sealed class BrainEngine
         _tick++;
 
         // 1) Perception
-        var percept = _perception.Sense(_tick);
-        yield return new TraceDto(_tick, "perception", new { timeUtc = percept.TimeUtc });
+        var input = _inputs.GetSnapshot();
+        var percept = _perception.Sense(_tick, input);
+
+        yield return new TraceDto(_tick, "perception", new
+        {
+            timeUtc = percept.TimeUtc,
+            input = new { input.Stress, input.Energy, input.Focus, input.Goal, input.Command }
+        });
 
         // 2) State estimation
         var state = _stateEstimator.Estimate(_mode, _tick);
         yield return new TraceDto(_tick, "state", new { mode = state.Mode });
 
         // 3) Policy decision
-        var decision = _policy.Decide(_tick);
+        var decision = _policy.Decide(percept, state);
         _lastDecision = decision.Name;
-        yield return new TraceDto(_tick, "policy", new { decision = decision.Name });
-
+        yield return new TraceDto(_tick, "policy", new
+        {
+            decision = decision.Name,
+            confidence = decision.Confidence,
+            reason = decision.Reason
+        });
         // 4) Act
         var act = _actuator.Act(decision.Name);
         yield return new TraceDto(_tick, "act", new { done = act.Done });
+
+
     }
 }

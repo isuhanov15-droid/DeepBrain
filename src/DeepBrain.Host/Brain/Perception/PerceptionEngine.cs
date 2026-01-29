@@ -1,8 +1,9 @@
-using DeepBrain.Host.Brain.Perception;
+using DeepBrain.Shared.Input;
 
 namespace DeepBrain.Host.Brain.Perception;
 
 public sealed class PerceptionEngine
 {
-    public Percept Sense(long tick) => new(DateTimeOffset.UtcNow, tick);
+    public Percept Sense(long tick, BrainInputDto input)
+        => new(DateTimeOffset.UtcNow, tick, input);
 }
