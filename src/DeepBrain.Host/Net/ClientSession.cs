@@ -8,23 +8,34 @@ public sealed class ClientSession : IAsyncDisposable
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
     private readonly CancellationTokenSource _cts = new();
+    private readonly Func<Task> _onBrainStart;
+    private readonly Func<Task> _onBrainStop;
+    private readonly Func<Task> _onBrainStep;
+    private readonly Func<string, Task> _onInfo;
 
     public string Remote => _client.Client.RemoteEndPoint?.ToString() ?? "unknown";
     public bool WantsLogs { get; private set; }
     public bool WantsState { get; private set; }
+    public bool WantsTrace { get; private set; }
 
-    public ClientSession(TcpClient client)
+
+    public ClientSession(TcpClient client, Func<string, Task> onInfo, Func<Task> onBrainStart, Func<Task> onBrainStop, Func<Task> onBrainStep)
     {
         _client = client;
+        _onInfo = onInfo;
         _stream = client.GetStream();
+        _onBrainStart = onBrainStart;
+        _onBrainStop = onBrainStop;
+        _onBrainStep = onBrainStep;
     }
+
 
     public async Task RunAsync(Func<string, Task> onInfo, CancellationToken serverCt)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(serverCt, _cts.Token);
         var ct = linked.Token;
 
-        await onInfo($"Client connected: {Remote}");
+        await _onInfo($"Client connected: {Remote}");
 
         try
         {
@@ -65,20 +76,29 @@ public sealed class ClientSession : IAsyncDisposable
                 WantsState = true;
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] state subscribed 🧠", ct);
                 break;
-
             case Msg.BrainStart:
-                await onInfo($"BrainStart from {Remote}");
-                // тут пока просто логируем, позже привяжем к BrainLoop
+                await _onBrainStart();
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.start ✅", ct);
                 break;
 
             case Msg.BrainStop:
-                await onInfo($"BrainStop from {Remote}");
+                await _onBrainStop();
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.stop 🛑", ct);
                 break;
 
+            case Msg.BrainStep:
+                await _onBrainStep();
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.step 👣", ct);
+                break;
+
+            case Msg.TraceSubscribe:
+                WantsTrace = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] trace subscribed 🔬", ct);
+                break;
+
+
             default:
-                await onInfo($"Unknown msg from {Remote}: {env.Type}");
+                await _onInfo($"Unknown msg from {Remote}: {env.Type}");
                 break;
         }
     }
@@ -105,10 +125,15 @@ public sealed class ClientSession : IAsyncDisposable
         _cts.Dispose();
         await Task.CompletedTask;
     }
-public async Task SendStateAsync(object payload, CancellationToken ct)
+    public async Task SendStateAsync(object payload, CancellationToken ct)
+    {
+        if (!WantsState) return;
+        await SendAsync(new Envelope(Msg.BrainState, Guid.NewGuid().ToString("N"), NowMs(), payload), ct);
+    }
+public async Task SendTraceAsync(object payload, CancellationToken ct)
 {
-    if (!WantsState) return;
-    await SendAsync(new Envelope(Msg.BrainState, Guid.NewGuid().ToString("N"), NowMs(), payload), ct);
+    if (!WantsTrace) return;
+    await SendAsync(new Envelope(Msg.TraceAppend, Guid.NewGuid().ToString("N"), NowMs(), payload), ct);
 }
 
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

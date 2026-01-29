@@ -13,6 +13,10 @@ public static class Msg
 
     public const string BrainStart = "brain.start";
     public const string BrainStop = "brain.stop";
+    public const string BrainStep = "brain.step";
+
+    public const string TraceSubscribe = "trace.subscribe";
+    public const string TraceAppend = "trace.append";
 
 
 

@@ -33,10 +33,15 @@ public partial class MainWindow : Window
         ClearBtn.Click += (_, _) => _logs.Clear();
         _tcp.OnState += (tick, uptime, mode, decision) => Ui(() =>
 {
-    BrainStateText.Text = $"tick={tick}  uptime={uptime}ms  mode={mode}  decision={decision}";
+    StatusText.Text = $"tick={tick}  uptime={uptime}ms  mode={mode}  decision={decision}";
 });
+        BrainStartBtn.Click += async (_, _) => await _tcp.BrainStartAsync();
+        BrainStopBtn.Click += async (_, _) => await _tcp.BrainStopAsync();
+        BrainStepBtn.Click += async (_, _) => await _tcp.BrainStepAsync();
+        SubTraceBtn.Click += async (_, _) => await _tcp.SubscribeTraceAsync();
 
-        
+       _tcp.OnTrace += s => Ui(() => AddLog($"🔬 {s}"));
+
 
     }
 

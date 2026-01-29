@@ -15,13 +15,24 @@ public sealed class TcpBrainServer : IAsyncDisposable
     private readonly List<ClientSession> _clients = new();
     private readonly object _lock = new();
 
+    private readonly Func<Task> _onBrainStart;
+    private readonly Func<Task> _onBrainStop;
+    private readonly Func<Task> _onBrainStep;
+
+
     public int Port { get; }
 
-    public TcpBrainServer(int port)
-    {
-        Port = port;
-        _listener = new TcpListener(IPAddress.Loopback, port);
-    }
+    public TcpBrainServer(int port, Func<Task> onBrainStart, Func<Task> onBrainStop, Func<Task> onBrainStep)
+{
+    Port = port;
+    _listener = new TcpListener(IPAddress.Loopback, port); // <-- ВАЖНО
+
+    _onBrainStart = onBrainStart;
+    _onBrainStop  = onBrainStop;
+    _onBrainStep  = onBrainStep;
+}
+
+
 
     public void Start() => _listener.Start();
 
@@ -32,7 +43,14 @@ public sealed class TcpBrainServer : IAsyncDisposable
         while (!ct.IsCancellationRequested)
         {
             TcpClient client = await _listener.AcceptTcpClientAsync(ct);
-            var session = new ClientSession(client);
+            var session = new ClientSession(
+    client,
+    onInfo,
+    _onBrainStart,
+    _onBrainStop,
+    _onBrainStep
+);
+
 
             lock (_lock) _clients.Add(session);
 
@@ -85,5 +103,16 @@ public sealed class TcpBrainServer : IAsyncDisposable
             catch { }
         }
     }
+    public async Task BroadcastTraceAsync(object payload, CancellationToken ct)
+{
+    List<ClientSession> snapshot;
+    lock (_lock) snapshot = _clients.ToList();
+
+    foreach (var c in snapshot)
+    {
+        try { await c.SendTraceAsync(payload, ct); } catch { }
+    }
+}
+
 
 }

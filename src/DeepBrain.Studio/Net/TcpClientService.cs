@@ -18,6 +18,8 @@ public sealed class TcpClientService : IAsyncDisposable
     public event Action<string>? OnLog;
     public event Action<string>? OnInfo;
     public event Action<long, long, string, string>? OnState;
+    public event Action<string>? OnTrace;
+
 
     public async Task ConnectAsync(string host, int port)
     {
@@ -90,7 +92,7 @@ public sealed class TcpClientService : IAsyncDisposable
 
 
             case Msg.BrainState:
-                
+
                 if (env.Payload is JsonElement s)
                 {
                     long tick = s.TryGetProperty("tick", out var tickEl) ? tickEl.GetInt64() : 0;
@@ -99,6 +101,9 @@ public sealed class TcpClientService : IAsyncDisposable
                     string decision = s.TryGetProperty("lastDecision", out var d) ? (d.GetString() ?? "") : "";
                     OnState?.Invoke(tick, uptime, mode, decision);
                 }
+                break;
+            case Msg.TraceAppend:
+                OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
                 break;
 
         }
@@ -130,6 +135,25 @@ public sealed class TcpClientService : IAsyncDisposable
         if (_stream is null) return;
 
         var env = new Envelope(Msg.BrainStateSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
+        await SendAsync(env, _cts?.Token ?? CancellationToken.None);
+    }
+
+    public Task BrainStartAsync() => SendTypeAsync(Msg.BrainStart);
+    public Task BrainStopAsync() => SendTypeAsync(Msg.BrainStop);
+    public Task BrainStepAsync() => SendTypeAsync(Msg.BrainStep);
+
+    private async Task SendTypeAsync(string type)
+    {
+        if (_stream is null) return;
+
+        var env = new Envelope(type, Guid.NewGuid().ToString("N"), NowMs(), new { });
+        await SendAsync(env, _cts?.Token ?? CancellationToken.None);
+    }
+
+    public async Task SubscribeTraceAsync()
+    {
+        if (_stream is null) return;
+        var env = new Envelope(Msg.TraceSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
         await SendAsync(env, _cts?.Token ?? CancellationToken.None);
     }
 

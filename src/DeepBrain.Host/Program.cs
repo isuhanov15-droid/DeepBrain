@@ -1,16 +1,19 @@
-﻿using DeepBrain.Host.Net;
-using DeepBrain.Shared.Brain;
+﻿using DeepBrain.Host.Brain;
+using DeepBrain.Host.Net;
 
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
-var server = new TcpBrainServer(port: 5555);
-server.Start();
+var brain = new BrainEngine();
 
-var startedAt = DateTimeOffset.UtcNow;
-long tick = 0;
-string mode = "idle";
-string lastDecision = "none";
+var server = new TcpBrainServer(
+    port: 5555,
+    onBrainStart: () => { brain.Start(); return Task.CompletedTask; },
+    onBrainStop:  () => { brain.Stop();  return Task.CompletedTask; },
+    onBrainStep:  () => { brain.Step(isForced: true); return Task.CompletedTask; }
+);
+
+server.Start();
 
 Task Info(string s)
 {
@@ -28,31 +31,33 @@ var heartbeatTask = Task.Run(async () =>
     while (!cts.Token.IsCancellationRequested)
     {
         i++;
-        var text = $"[{DateTime.Now:HH:mm:ss}] DeepBrain.Host heartbeat #{i}";
-        await server.BroadcastLogAsync(text, cts.Token);
+        await server.BroadcastLogAsync(
+            $"[{DateTime.Now:HH:mm:ss}] DeepBrain.Host heartbeat #{i}",
+            cts.Token
+        );
+
         await Task.Delay(1000, cts.Token);
     }
 }, cts.Token);
 
-// state loop (раз в 250мс)
-var stateTask = Task.Run(async () =>
+// brain/state loop (раз в 250мс)
+var brainLoopTask = Task.Run(async () =>
 {
     while (!cts.Token.IsCancellationRequested)
     {
-        tick++;
+        // Тикаем только если running (BrainEngine сам решает)
+        var traces = brain.TickWithTrace(isForced: false);
 
-        // пока примитивная “логика”, потом заменим BrainLoop
-        if (tick % 20 == 0) mode = mode == "idle" ? "running" : "idle";
-        lastDecision = (tick % 2 == 0) ? "observe" : "wait";
+        foreach (var tr in traces)
+            await server.BroadcastTraceAsync(tr, cts.Token);
 
-        var uptimeMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
-        var dto = new BrainStateDto(tick, uptimeMs, mode, lastDecision);
-
-        await server.BroadcastStateAsync(dto, cts.Token);
+        // Шлём состояние только из BrainEngine (единственный источник правды)
+        await server.BroadcastStateAsync(brain.GetState(), cts.Token);
 
         await Task.Delay(250, cts.Token);
     }
 }, cts.Token);
 
-await Task.WhenAll(acceptTask, heartbeatTask, stateTask);
+
+await Task.WhenAll(acceptTask, heartbeatTask, brainLoopTask);
 await server.DisposeAsync();
