@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.Trace;
 
@@ -32,6 +32,9 @@ public sealed class LifeLoop
     private readonly SelfTalkEngine _selfTalk = new();
     private readonly SelfTalkThrottle _selfTalkThrottle = new();
     private readonly ActionCooldowns _cooldowns = new();
+    private readonly PersonalityProfile _personality = PersonalityProfile.LoadLada();
+    private readonly VoiceModeResolver _voice = new();
+    private readonly HabitSystem _habits = new();
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
 
@@ -149,7 +152,14 @@ public sealed class LifeLoop
                 null,
                 null,
                 _world.Events.GetRecent(5),
-                _semantic.GetTopNotes(3)
+                _semantic.GetTopNotes(3),
+                new DeepBrain.Shared.BrainDtos.V5.CharacterStateDto(
+                    _personality.Persona,
+                    _habits.GetTopHabits(5),
+                    null,
+                    0.0,
+                    "calm"
+                )
             );
             _broadcast(stateSleep, ct);
             _tick++;
@@ -171,6 +181,7 @@ public sealed class LifeLoop
         var computedAffect = _emotion.Compute(instincts, _homeo);
         var (inertAffect, moodInertia) = _inertia.Apply(_affect, computedAffect, instincts.SelfPreservation);
         _affect = inertAffect;
+        _personality.ApplyBaselines(ref _affect, ref instincts);
 
         var dominantDrive = _driveResolver.Resolve(instincts);
         var goals = _goals.Resolve(_homeo, instincts, dominantDrive, circ.Phase);
@@ -181,9 +192,14 @@ public sealed class LifeLoop
             _log("PLAN INTERRUPTED");
 
         var recentEvents = _world.Events.GetRecent(5);
+        goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
         var computedAttention = _attention.Compute(_homeo, instincts, _affect, circ, recentEvents);
         var attention = _attentionInertia.Apply(computedAttention);
         var semanticKey = $"{_affect.Mood}+drive={dominantDrive}+phase={circ.Phase}+focus={attention.Focus1}";
+        var cueKey = _habits.ComputeCue(attention, circ, _loop, recentEvents, _homeo);
+        var (habitAction, habitStrength, habitId) = _habits.Suggest(cueKey);
+        var habitInfluence = _habits.ComputeInfluence(_personality.Persona, habitStrength);
+        var voiceMode = _voice.Resolve(_personality.Persona, _affect, instincts, circ);
 
         var (action, reason, strategy) = _selector.Choose(
             _homeo,
@@ -194,6 +210,9 @@ public sealed class LifeLoop
             _memory,
             _cooldowns,
             _tick,
+            habitAction,
+            habitStrength,
+            habitInfluence,
             dominantDrive,
             activePlan?.Strategy,
             attention.Focus1,
@@ -243,7 +262,7 @@ public sealed class LifeLoop
 
         if (!string.IsNullOrWhiteSpace(outcome.Message))
         {
-            var msg = outcome.Message!.Trim();
+            var msg = FormatOutputMessage(outcome.Message!.Trim(), action.Name, voiceMode);
             _log($"[life] OUTPUT: {msg}");
             EmitTrace("output", new { message = msg, actionName = action.Name }, ct);
             _outputSinceDiag = msg;
@@ -276,7 +295,14 @@ public sealed class LifeLoop
             activePlan,
             attention,
             recentEvents,
-            _semantic.GetTopNotes(3)
+            _semantic.GetTopNotes(3),
+            new DeepBrain.Shared.BrainDtos.V5.CharacterStateDto(
+                _personality.Persona,
+                _habits.GetTopHabits(5),
+                habitId,
+                habitInfluence,
+                voiceMode
+            )
         );
 
         var episode = new EpisodeDto(
@@ -303,7 +329,8 @@ public sealed class LifeLoop
             var planLine = activePlan is null ? "none" : $"{activePlan.Strategy}/{activePlan.GoalId}/{activePlan.RemainingTicks}";
             var topEvent = recentEvents.FirstOrDefault();
             var topEventText = topEvent is null ? "none" : $"{topEvent.Type}/{topEvent.Salience:0.00}";
-            var line = $"tick={_tick} | phase={circ.Phase} | sleeping={circ.IsSleeping} | focus={attention.Focus1}({attention.Intensity:0.00}) | topEvent={topEventText} | plan={planLine} | action={action.Name}({action.Kind}) | reward={reward:0.000} | loopPenalty={_loop.LoopPenalty:0.00} | selftalk={(string.IsNullOrWhiteSpace(_lastSelfTalk) ? "no" : "yes")}";
+            var habitLine = habitAction is null ? "none" : $"{habitAction}/{habitStrength:0.00}";
+            var line = $"tick={_tick} | phase={circ.Phase} | focus={attention.Focus1}({attention.Intensity:0.00}) | voice={voiceMode} | cue={cueKey} | habit={habitLine} | plan={planLine} | action={action.Name}({action.Kind}) | reward={reward:0.000} | loopPenalty={_loop.LoopPenalty:0.00} | selftalk={(string.IsNullOrWhiteSpace(_lastSelfTalk) ? "no" : "yes")}";
             _log(line);
             if (!string.IsNullOrWhiteSpace(_outputSinceDiag))
             {
@@ -323,7 +350,7 @@ public sealed class LifeLoop
             attention.Focus1,
             recentEvents.Any(e => e.Type == "calm_window"),
             reward
-        ));
+        ), voiceMode, _tick);
         _lastSelfTalk = selfTalk;
         if (!string.IsNullOrWhiteSpace(selfTalk) && _selfTalkThrottle.ShouldSpeak(_tick, selfTalk))
         {
@@ -331,6 +358,10 @@ public sealed class LifeLoop
             EmitTrace("selftalk", new { text = selfTalk }, ct);
             _output(new LifeOutputDto(_tick, DateTimeOffset.Now, selfTalk, "selftalk"), ct);
         }
+
+        var habitUpdated = _habits.UpdateAfter(action.Name, reward, cueKey);
+        if (habitUpdated is not null)
+            _log($"HABIT_LEARN: {cueKey} -> {habitUpdated.Id} strength={habitUpdated.Strength:0.00} avgReward={habitUpdated.AvgReward:0.000}");
 
         _tick++;
     }
@@ -352,6 +383,18 @@ public sealed class LifeLoop
         return bonus;
     }
 
+    private static string FormatOutputMessage(string message, string actionName, string voiceMode)
+    {
+        if (actionName == "emit_message")
+        {
+            if (voiceMode == "tender")
+                return "мягкий сигнал связи";
+            return "подаю сигнал связи";
+        }
+
+        return message;
+    }
+
     private void AppendEpisode(EpisodeDto episode)
     {
         if (_episodes.Count >= EpisodeCapacity)
@@ -359,3 +402,4 @@ public sealed class LifeLoop
         _episodes.Add(episode);
     }
 }
+

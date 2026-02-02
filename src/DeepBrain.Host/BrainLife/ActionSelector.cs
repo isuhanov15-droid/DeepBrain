@@ -16,6 +16,9 @@ public sealed class ActionSelector
         EpisodeMemory memory,
         ActionCooldowns cooldowns,
         long tick,
+        string? habitAction,
+        double habitStrength,
+        double habitInfluence,
         string dominantDrive,
         string? planStrategy,
         string attentionFocus,
@@ -57,6 +60,7 @@ public sealed class ActionSelector
         ApplyMemoryBias(list, memory, homeo, affect);
         ApplyAttentionBias(list, attentionFocus);
         ApplySemanticBias(list, semantic, semanticKey);
+        ApplyHabitBias(list, habitAction, habitStrength, habitInfluence, cooldowns, tick);
         ApplyCooldowns(list, cooldowns, tick);
 
         if (list.Count == 0)
@@ -171,6 +175,27 @@ public sealed class ActionSelector
             var (bonus, penalty) = semantic.SuggestBonus(semanticKey, c.Action.Name);
             if (bonus != 0 || penalty != 0)
                 list[i] = c with { Score = c.Score + bonus - penalty };
+        }
+    }
+
+    private static void ApplyHabitBias(
+        List<Candidate> list,
+        string? habitAction,
+        double habitStrength,
+        double habitInfluence,
+        ActionCooldowns cooldowns,
+        long tick)
+    {
+        if (string.IsNullOrWhiteSpace(habitAction)) return;
+        if (cooldowns.IsOnCooldown(habitAction, tick, 2)) return;
+
+        for (var i = 0; i < list.Count; i++)
+        {
+            var c = list[i];
+            if (c.Action.Name != habitAction) continue;
+            var bonus = 0.05 + habitStrength * 0.1;
+            list[i] = c with { Score = c.Score + bonus * LifeMath.Clamp01(habitInfluence) };
+            break;
         }
     }
 

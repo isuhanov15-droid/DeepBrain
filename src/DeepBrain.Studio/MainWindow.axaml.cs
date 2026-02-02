@@ -194,6 +194,33 @@ public partial class MainWindow : Window
         {
             LifeSemanticText.Text = "semantic=n/a";
         }
+
+        if (state.Character is not null)
+        {
+            var p = state.Character.Personality;
+            LifeVoiceModeText.Text = $"voiceMode={state.Character.VoiceMode}";
+            LifePersonalityText.Text = $"persona={p.PersonaId} warmth={p.Warmth:0.00} fire={p.Fire:0.00} humor={p.Humor:0.00}";
+            if (state.Character.HabitsTop is not null && state.Character.HabitsTop.Count > 0)
+            {
+                var habitsLine = state.Character.HabitsTop
+                    .Select(h => $"{h.Id}:{h.Strength:0.00} uses={h.Uses} avg={h.AvgReward:0.00}")
+                    .ToArray();
+                LifeHabitsText.Text = $"habits={string.Join(" | ", habitsLine)}";
+            }
+            else
+            {
+                LifeHabitsText.Text = "habits=n/a";
+            }
+
+            LifeActiveHabitText.Text = $"activeHabit={state.Character.ActiveHabitId ?? "n/a"} influence={state.Character.HabitInfluence:0.00}";
+        }
+        else
+        {
+            LifeVoiceModeText.Text = "voiceMode=n/a";
+            LifePersonalityText.Text = "persona=n/a";
+            LifeHabitsText.Text = "habits=n/a";
+            LifeActiveHabitText.Text = "activeHabit=n/a";
+        }
     }
 
     private async Task RunSafeAsync(Func<Task> action)

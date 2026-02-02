@@ -2,19 +2,21 @@ namespace DeepBrain.Host.BrainLife;
 
 public sealed class SelfTalkEngine
 {
-    public string? MaybeSpeak(SelfTalkContext ctx)
+    private readonly LadaStyleBank _style = new();
+
+    public string? MaybeSpeak(SelfTalkContext ctx, string voiceMode, long tick)
     {
         if (ctx.EnteredSleep)
-            return "Пора восстановиться. Перехожу в сон.";
+            return _style.Pick("rest", voiceMode, tick);
         if (ctx.WokeUp)
-            return "Я проснулся. Начинаю новый цикл.";
+            return "Я проснулась. Начинаю новый цикл.";
         if (ctx.LoopPenalty > 0.5)
-            return "Я зациклился. Меняю подход.";
+            return _style.Pick("loop", voiceMode, tick);
         if (ctx.Mood == "anxious" && ctx.SelfPreservation > 0.8)
-            return "Я в тревоге. Сужаю фокус и дышу.";
+            return _style.Pick("anxious", voiceMode, tick);
         if (ctx.AttentionFocus == "novelty" && ctx.HasCalmWindow)
-            return "Можно исследовать: безопасное окно.";
-        if (ctx.Reward > 0.2)
+            return _style.Pick("calm_window", voiceMode, tick);
+        if (ctx.Reward > 0.25)
             return "Это сработало. Запомню.";
         return null;
     }
