@@ -45,4 +45,13 @@ public sealed class LoopDetector
             _inLoop = false;
         }
     }
+
+    public void ResetShortTerm()
+    {
+        _recentRewards.Clear();
+        SameActionStreak = 0;
+        AvgRewardShort = 0;
+        LoopPenalty = 0;
+        _inLoop = false;
+    }
 }

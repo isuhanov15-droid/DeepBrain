@@ -24,4 +24,12 @@ public sealed class LearningEngine
         var best = _emaReward.OrderByDescending(kv => kv.Value).First();
         return (best.Key, best.Value);
     }
+
+    public void AddBias(string actionName, double amount)
+    {
+        if (_emaReward.TryGetValue(actionName, out var cur))
+            _emaReward[actionName] = cur + amount;
+        else
+            _emaReward[actionName] = amount;
+    }
 }

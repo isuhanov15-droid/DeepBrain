@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -125,6 +126,36 @@ public partial class MainWindow : Window
         LifeLoopText.Text = $"loopPenalty={policy?.LoopPenalty:0.00} streak={policy?.SameActionStreak} loops={policy?.LoopCount}";
         LifeAvgRewardText.Text = $"avgRewardShort={policy?.AvgRewardShort:0.000}";
         LifeInertiaText.Text = $"moodInertia={state.MoodInertia:0.00}";
+        if (state.Circadian is not null)
+        {
+            LifeCircadianText.Text = $"circadian={state.Circadian.Phase} tod={state.Circadian.TimeOfDay:0.00} sleep={state.Circadian.IsSleeping} pressure={state.Circadian.SleepPressure:0.00}";
+        }
+        else
+        {
+            LifeCircadianText.Text = "circadian=n/a";
+        }
+
+        if (state.ActivePlan is not null)
+        {
+            LifePlanText.Text = $"plan={state.ActivePlan.Strategy}/{state.ActivePlan.GoalId} ttl={state.ActivePlan.RemainingTicks}";
+        }
+        else
+        {
+            LifePlanText.Text = "plan=n/a";
+        }
+
+        if (state.Goals is not null)
+        {
+            var parts = state.Goals
+                .Take(4)
+                .Select(g => $"{g.Id}:{g.Urgency:0.00}/{g.Satisfaction:0.00}")
+                .ToArray();
+            LifeGoalsText.Text = $"goals={string.Join(", ", parts)}";
+        }
+        else
+        {
+            LifeGoalsText.Text = "goals=n/a";
+        }
     }
 
     private async Task RunSafeAsync(Func<Task> action)

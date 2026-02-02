@@ -45,6 +45,9 @@
 						<TextBlock Name="LifeLoopText"/>
 						<TextBlock Name="LifeAvgRewardText"/>
 						<TextBlock Name="LifeInertiaText"/>
+						<TextBlock Name="LifeCircadianText"/>
+						<TextBlock Name="LifePlanText"/>
+						<TextBlock Name="LifeGoalsText"/>
 					</StackPanel>
 				</Border>
 				<TextBlock Grid.Row="1" Text="Outputs" FontWeight="Bold" Margin="0,8,0,4"/>

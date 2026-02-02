@@ -13,31 +13,32 @@ public sealed class ActionSelector
         LearningEngine learning,
         LoopDetector loop,
         EpisodeMemory memory,
-        string dominantDrive)
+        string dominantDrive,
+        string? planStrategy)
     {
         var list = new List<Candidate>();
 
-        var strategy = ResolveStrategy(instincts, affect, dominantDrive, loop);
+        var strategy = ResolveStrategy(instincts, affect, dominantDrive, loop, planStrategy);
 
-        if (strategy == "regulate" || instincts.SelfPreservation > 0.6)
+        if (IsAllowed(strategy, "regulate") || instincts.SelfPreservation > 0.6)
         {
             list.Add(Make("internal", "breathe_slow", instincts.SelfPreservation, "self_preservation", learning));
             list.Add(Make("internal", "focus_narrow", instincts.SelfPreservation * 0.8, "self_preservation", learning));
         }
 
-        if (strategy == "rest" || instincts.EnergyConservation > 0.6)
+        if (IsAllowed(strategy, "rest") || instincts.EnergyConservation > 0.6)
             list.Add(Make("internal", "rest_short", instincts.EnergyConservation, "energy_conservation", learning));
 
-        if (strategy == "explore" || instincts.Exploration >= 0.6)
+        if (IsAllowed(strategy, "explore") || instincts.Exploration >= 0.6)
         {
             list.Add(Make("external", "explore_signal", instincts.Exploration, "exploration", learning));
             list.Add(Make("internal", "focus_widen", instincts.Exploration * 0.8, "exploration", learning));
         }
 
-        if (strategy == "connect" || instincts.Attachment >= 0.6)
+        if (IsAllowed(strategy, "connect") || instincts.Attachment >= 0.6)
             list.Add(Make("external", "emit_message", instincts.Attachment, "attachment", learning));
 
-        if (strategy == "regulate" || affect.Mood == "frustrated" || instincts.Agency > 0.6)
+        if (IsAllowed(strategy, "regulate") || affect.Mood == "frustrated" || instincts.Agency > 0.6)
         {
             list.Add(Make("internal", "reframe_negative", instincts.Agency, "agency", learning));
             list.Add(Make("internal", "focus_narrow", instincts.Agency * 0.7, "agency", learning));
@@ -66,8 +67,11 @@ public sealed class ActionSelector
         return new Candidate(action, score, reason);
     }
 
-    private static string ResolveStrategy(InstinctsDto instincts, AffectDto affect, string dominantDrive, LoopDetector loop)
+    private static string ResolveStrategy(InstinctsDto instincts, AffectDto affect, string dominantDrive, LoopDetector loop, string? planStrategy)
     {
+        if (!string.IsNullOrWhiteSpace(planStrategy))
+            return planStrategy!;
+
         if (loop.SameActionStreak >= 5 && loop.AvgRewardShort < 0)
             return dominantDrive == "energy_conservation" ? "rest" : "regulate";
 
@@ -83,6 +87,11 @@ public sealed class ActionSelector
             return "regulate";
 
         return dominantDrive == "exploration" ? "explore" : "focus";
+    }
+
+    private static bool IsAllowed(string activeStrategy, string candidateStrategy)
+    {
+        return activeStrategy == candidateStrategy;
     }
 
     private static void ApplyLoopPenalty(List<Candidate> list, LoopDetector loop)

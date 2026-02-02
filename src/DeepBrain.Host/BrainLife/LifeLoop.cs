@@ -1,3 +1,4 @@
+using System.Linq;
 using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.Trace;
 
@@ -21,6 +22,11 @@ public sealed class LifeLoop
     private readonly LoopDetector _loop = new();
     private readonly MoodInertiaEngine _inertia = new();
     private readonly DominantDriveResolver _driveResolver = new();
+    private readonly CircadianClock _clock = new();
+    private readonly SleepEngine _sleep = new();
+    private readonly GoalResolver _goals = new();
+    private readonly PlanEngine _plan = new();
+    private bool _sleepConsolidated;
 
     private HomeostasisDto _homeo = new(0.7, 0.2, 0.3, 0.1, 0.7);
     private AffectDto _affect = new("calm", 0.2, 0.3);
@@ -91,6 +97,54 @@ public sealed class LifeLoop
     {
         var beforeHomeo = _homeo;
         var beforeAffect = _affect;
+
+        _clock.Tick(dtSeconds, _sleep.IsSleeping);
+        _sleep.Update(_clock, ref _homeo, ref _affect);
+        if (_sleep.EnteredSleep)
+        {
+            _sleepConsolidated = false;
+            _log("ENTER SLEEP");
+        }
+        if (_sleep.WokeUp)
+            _log("WAKE UP");
+
+        if (_sleep.IsSleeping)
+        {
+            if (!_sleepConsolidated)
+            {
+                var sums = _memory.Consolidate();
+                foreach (var kv in sums)
+                {
+                    if (kv.Value > 0)
+                        _learning.AddBias(kv.Key, 0.02);
+                    else if (kv.Value < 0)
+                        _learning.AddBias(kv.Key, -0.01);
+                }
+                _loop.ResetShortTerm();
+                _sleepConsolidated = true;
+            }
+
+            var circadian = _clock.Snapshot(true);
+            var stateSleep = new LifeStateDto(
+                _tick,
+                DateTimeOffset.Now,
+                _homeo,
+                _instincts.Compute(_homeo, _world),
+                _affect,
+                "sleep",
+                0,
+                null,
+                "",
+                1.0 - _affect.Arousal,
+                circadian,
+                Array.Empty<DeepBrain.Shared.BrainDtos.V3.GoalDto>(),
+                null
+            );
+            _broadcast(stateSleep, ct);
+            _tick++;
+            return;
+        }
+
         _world.Tick(_tick);
 
         _homeo = _homeostasis.Update(_homeo, _world, dtSeconds);
@@ -105,7 +159,24 @@ public sealed class LifeLoop
         _affect = inertAffect;
 
         var dominantDrive = _driveResolver.Resolve(instincts);
-        var (action, reason, strategy) = _selector.Choose(_homeo, instincts, _affect, _learning, _loop, _memory, dominantDrive);
+        var circ = _clock.Snapshot(false);
+        var goals = _goals.Resolve(_homeo, instincts, dominantDrive, circ.Phase);
+        var activePlan = _plan.Update(goals, dominantDrive, _loop.LoopPenalty, _sleep.IsSleeping, instincts.SelfPreservation);
+        if (_plan.Created)
+            _log($"PLAN CREATED: {activePlan?.Strategy} goal={activePlan?.GoalId} ttl={activePlan?.RemainingTicks}");
+        if (_plan.Interrupted)
+            _log("PLAN INTERRUPTED");
+
+        var (action, reason, strategy) = _selector.Choose(
+            _homeo,
+            instincts,
+            _affect,
+            _learning,
+            _loop,
+            _memory,
+            dominantDrive,
+            activePlan?.Strategy
+        );
         EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason }, ct);
 
         var outcome = _actuator.Apply(action, ref _homeo, ref _affect);
@@ -174,7 +245,10 @@ public sealed class LifeLoop
             reward,
             policy,
             dominantDrive,
-            moodInertia
+            moodInertia,
+            circ,
+            goals,
+            activePlan
         );
 
         var episode = new EpisodeDto(
@@ -187,13 +261,18 @@ public sealed class LifeLoop
         );
 
         AppendEpisode(episode);
-        _memory.Add(episode);
+        _memory.Add(episode, activePlan?.GoalId ?? "none", strategy);
+
+        if (activePlan is not null)
+            _goals.ApplyGoalSatisfaction(activePlan.GoalId, reward > 0 ? 0.05 : -0.02);
 
         _broadcast(state, ct);
 
-        if (_tick < DiagnosticTicks && _tick % 20 == 0)
+        if (_tick < DiagnosticTicks && _tick % 50 == 0)
         {
-            var line = $"tick={_tick} | mood={_affect.Mood}({ _affect.Valence:0.00}/{ _affect.Arousal:0.00}) | drive={dominantDrive} | strategy={strategy} | action={action.Name}({action.Kind}) | reward={reward:0.000} | streak={_loop.SameActionStreak} | avgR={_loop.AvgRewardShort:0.000} | loopPenalty={_loop.LoopPenalty:0.00}";
+            var goalsLine = string.Join(",", goals.Select(g => $"{g.Id}:{g.Urgency:0.00}"));
+            var planLine = activePlan is null ? "none" : $"{activePlan.Strategy}/{activePlan.GoalId}/{activePlan.RemainingTicks}";
+            var line = $"tick={_tick} | phase={circ.Phase} | sleeping={circ.IsSleeping} | drive={dominantDrive} | goals=[{goalsLine}] | plan={planLine} | action={action.Name}({action.Kind}) | reward={reward:0.000}";
             _log(line);
             if (!string.IsNullOrWhiteSpace(_outputSinceDiag))
             {
