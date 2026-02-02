@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using DeepBrain.Studio.Net;
+using DeepBrain.Shared.Brain;
 
 namespace DeepBrain.Studio;
 
@@ -44,6 +45,7 @@ public partial class MainWindow : Window
             await _tcp.SubscribeLogsAsync();
             await _tcp.SubscribeStateAsync();
             await _tcp.SubscribeTraceAsync();
+            await _tcp.SubscribeLifeStateAsync();
         });
 
         DisconnectBtn.Click += async (_, _) => await RunSafeAsync(async () => await _tcp.DisconnectAsync());
@@ -52,6 +54,8 @@ public partial class MainWindow : Window
             _logs.Clear();
             _traces.Clear();
         };
+        BrainStartBtn.IsEnabled = false;
+        BrainStopBtn.IsEnabled = false;
         _tcp.OnState += (tick, uptime, mode, decision) => Ui(() =>
         {
             StatusText.Text = $"tick={tick}  uptime={uptime}ms  mode={mode}  decision={decision}";
@@ -60,6 +64,7 @@ public partial class MainWindow : Window
         BrainStopBtn.Click += async (_, _) => await RunSafeAsync(async () => await _tcp.BrainStopAsync());
 
         _tcp.OnTrace += s => Ui(() => AddTrace(s));
+        _tcp.OnLifeState += state => Ui(() => UpdateLife(state));
     }
 
     private void HandleLog(string text)
@@ -94,6 +99,15 @@ public partial class MainWindow : Window
     {
         _heartbeatOn = !_heartbeatOn;
         HeartbeatText.Text = _heartbeatOn ? "❤" : "♡";
+    }
+
+    private void UpdateLife(LifeStateDto state)
+    {
+        LifeMoodText.Text = $"mood={state.Affect.Mood} valence={state.Affect.Valence:0.00} arousal={state.Affect.Arousal:0.00}";
+        LifeHomeostasisText.Text = $"energy={state.Homeostasis.Energy:0.00} fatigue={state.Homeostasis.Fatigue:0.00} safety={state.Homeostasis.Safety:0.00} pain={state.Homeostasis.Pain:0.00}";
+        LifeInstinctsText.Text = $"instincts: self={state.Instincts.SelfPreservation:0.00} energy={state.Instincts.EnergyConservation:0.00} explore={state.Instincts.Exploration:0.00} attach={state.Instincts.Attachment:0.00} agency={state.Instincts.Agency:0.00}";
+        LifeDecisionText.Text = $"lastDecision={state.LastDecision}";
+        LifeRewardText.Text = $"lastReward={state.LastReward:0.000}  tick={state.Tick}";
     }
 
     private async Task RunSafeAsync(Func<Task> action)

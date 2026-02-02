@@ -15,12 +15,16 @@ public sealed class ClientSession : IAsyncDisposable
     private readonly Func<Task> _onBrainStart;
     private readonly Func<Task> _onBrainStop;
     private readonly Func<Task> _onBrainStep;
+    private readonly Func<Task> _onLifeStart;
+    private readonly Func<Task> _onLifeStop;
+    private readonly Func<Task> _onLifeStep;
     private readonly Func<BrainInputDto, Task> _onInputSet;
     private readonly Func<string, Task> _onEventPush;
 
     private bool _wantsLogs;
     private bool _wantsState;
     private bool _wantsTrace;
+    private bool _wantsLifeState;
 
     public EndPoint Remote => _client.Client.RemoteEndPoint!;
 
@@ -29,6 +33,9 @@ public sealed class ClientSession : IAsyncDisposable
         Func<Task> onBrainStart,
         Func<Task> onBrainStop,
         Func<Task> onBrainStep,
+        Func<Task> onLifeStart,
+        Func<Task> onLifeStop,
+        Func<Task> onLifeStep,
         Func<BrainInputDto, Task> onInputSet,
         Func<string, Task> onEventPush)
     {
@@ -38,6 +45,9 @@ public sealed class ClientSession : IAsyncDisposable
         _onBrainStart = onBrainStart;
         _onBrainStop = onBrainStop;
         _onBrainStep = onBrainStep;
+        _onLifeStart = onLifeStart;
+        _onLifeStop = onLifeStop;
+        _onLifeStep = onLifeStep;
         _onInputSet = onInputSet;
         _onEventPush = onEventPush;
     }
@@ -91,6 +101,11 @@ public sealed class ClientSession : IAsyncDisposable
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] trace subscribed ✅", ct);
                 break;
 
+            case Msg.BrainLifeStateSubscribe:
+                _wantsLifeState = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] life state subscribed ✅", ct);
+                break;
+
             case Msg.BrainStart:
                 await _onBrainStart();
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.start ✅", ct);
@@ -104,6 +119,21 @@ public sealed class ClientSession : IAsyncDisposable
             case Msg.BrainStep:
                 await _onBrainStep();
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.step ✅", ct);
+                break;
+
+            case Msg.BrainLifeStart:
+                await _onLifeStart();
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.life.start ✅", ct);
+                break;
+
+            case Msg.BrainLifeStop:
+                await _onLifeStop();
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.life.stop ✅", ct);
+                break;
+
+            case Msg.BrainLifeStep:
+                await _onLifeStep();
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.life.step ✅", ct);
                 break;
 
             case Msg.InputSet:
@@ -140,6 +170,13 @@ public sealed class ClientSession : IAsyncDisposable
         if (!_wantsState) return;
         var payload = PayloadWriter.Write(state);
         await SendAsync(new Envelope(Msg.BrainState, payload), ct);
+    }
+
+    public async Task SendLifeStateAsync(LifeStateDto state, CancellationToken ct)
+    {
+        if (!_wantsLifeState) return;
+        var payload = PayloadWriter.Write(state);
+        await SendAsync(new Envelope(Msg.BrainLifeState, payload), ct);
     }
 
     public async Task SendTraceAsync(TraceDto trace, CancellationToken ct)

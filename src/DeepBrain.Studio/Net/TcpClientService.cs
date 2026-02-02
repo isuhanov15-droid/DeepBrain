@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using System.Net.Sockets;
 using DeepBrain.Shared.Net;
 using DeepBrain.Shared.Input;
+using DeepBrain.Shared.Brain;
 using System.Text.Json;
 
 namespace DeepBrain.Studio.Net;
@@ -21,6 +22,7 @@ public sealed class TcpClientService : IAsyncDisposable
     public event Action<string>? OnLog;
     public event Action<string>? OnInfo;
     public event Action<long, long, string, string>? OnState;
+    public event Action<LifeStateDto>? OnLifeState;
     public event Action<string>? OnTrace;
 
 
@@ -116,20 +118,24 @@ public sealed class TcpClientService : IAsyncDisposable
                 _pongTcs?.TrySetResult(true);
                 break;
 
-                case Msg.BrainState:
-                    if (env.Payload is JsonElement s)
-                    {
-                        long tick = s.TryGetProperty("tick", out var tickEl) ? tickEl.GetInt64() : 0;
-                        long uptime = s.TryGetProperty("uptimeMs", out var u) ? u.GetInt64() : 0;
-                        string mode = s.TryGetProperty("mode", out var m) ? (m.GetString() ?? "") : "";
-                        string decision = s.TryGetProperty("lastDecision", out var d) ? (d.GetString() ?? "") : "";
-                        OnState?.Invoke(tick, uptime, mode, decision);
-                    }
-                    break;
+            case Msg.BrainState:
+                if (env.Payload is JsonElement s)
+                {
+                    long tick = s.TryGetProperty("tick", out var tickEl) ? tickEl.GetInt64() : 0;
+                    long uptime = s.TryGetProperty("uptimeMs", out var u) ? u.GetInt64() : 0;
+                    string mode = s.TryGetProperty("mode", out var m) ? (m.GetString() ?? "") : "";
+                    string decision = s.TryGetProperty("lastDecision", out var d) ? (d.GetString() ?? "") : "";
+                    OnState?.Invoke(tick, uptime, mode, decision);
+                }
+                break;
 
-                case Msg.TraceAppend:
-                    OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
-                    break;
+            case Msg.BrainLifeState:
+                OnLifeState?.Invoke(PayloadReader.Read<LifeStateDto>(env.Payload));
+                break;
+
+            case Msg.TraceAppend:
+                OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
+                break;
             }
         }
         catch (Exception ex)
@@ -177,6 +183,14 @@ public sealed class TcpClientService : IAsyncDisposable
         if (_stream is null) return;
 
         var env = new Envelope(Msg.BrainStateSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
+        await SendAsync(env, _cts?.Token ?? CancellationToken.None);
+    }
+
+    public async Task SubscribeLifeStateAsync()
+    {
+        if (_stream is null) return;
+
+        var env = new Envelope(Msg.BrainLifeStateSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
         await SendAsync(env, _cts?.Token ?? CancellationToken.None);
     }
 

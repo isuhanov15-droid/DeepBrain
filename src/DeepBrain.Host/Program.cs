@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.IO;
 using DeepBrain.Host.Brain;
 using DeepBrain.Host.Brain.Input;
+using DeepBrain.Host.BrainLife;
 using DeepBrain.Host.Net;
+using DeepBrain.Shared.Net;
 
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
@@ -25,12 +27,17 @@ var brain = new BrainEngine(inputStore);
 var startTime = DateTime.Now;
 var logWriter = new FileBatchWriter("Logs", "logs", startTime);
 var traceWriter = new FileBatchWriter("Trace", "trace", startTime);
+var useLifeLoop = true;
+LifeLoop? lifeLoop = null;
 
 var server = new TcpBrainServer(
     port: 5555,
     onBrainStart: () => { brain.Start(); return Task.CompletedTask; },
     onBrainStop: () => { brain.Stop(); return Task.CompletedTask; },
     onBrainStep: () => { brain.TickWithTrace(isForced: true); return Task.CompletedTask; },
+    onLifeStart: () => { lifeLoop?.Start(); return Task.CompletedTask; },
+    onLifeStop: () => { lifeLoop?.Stop(); return Task.CompletedTask; },
+    onLifeStep: () => { lifeLoop?.Step(); return Task.CompletedTask; },
     onInputSet: (dto) => { inputStore.Set(dto); return Task.CompletedTask; },
     onEventPush: (name) => { brain.EnqueueEvent(name); return Task.CompletedTask; }
 );
@@ -39,6 +46,30 @@ var traceEnabled = 0;
 var consoleLock = new object();
 var logBuffer = new List<string>(500);
 var ui = new ConsoleUiState();
+lifeLoop = new LifeLoop(
+    new WorldSim(seed: 1337),
+    new HomeostasisEngine(),
+    new InstinctEngine(),
+    new EmotionEngine(),
+    new ActionSelector(),
+    new Actuator(),
+    new RewardEngine(),
+    new LearningEngine(),
+    (state, ct) => server.BroadcastLifeStateAsync(state, ct).GetAwaiter().GetResult(),
+    (trace, ct) =>
+    {
+        server.BroadcastTraceAsync(trace, ct).GetAwaiter().GetResult();
+        var payload = JsonSerializer.Serialize(trace.Data, JsonWire.Options);
+        var line = $"[{DateTime.Now:HH:mm:ss}] life trace [{trace.Tick}] {trace.Stage}: {payload}";
+        traceWriter.AddLine(line);
+        if (Volatile.Read(ref traceEnabled) == 1)
+        {
+            ui.AddTrace(line);
+            RenderScreen(ui, consoleLock);
+        }
+    },
+    msg => LogLine(consoleLock, logBuffer, logWriter, msg)
+);
 
 try
 {
@@ -47,12 +78,15 @@ try
     await server.StartAsync(cts.Token);
 
     LogLine(consoleLock, logBuffer, logWriter, "Host started OK listening on port 5555");
-    brain.Start();
+    if (!useLifeLoop)
+        brain.Start();
 
     await server.BroadcastLogAsync($"[{DateTime.Now:HH:mm:ss}] DeepBrain.Host up on 127.0.0.1:5555 OK");
 
     var heartbeatTask = RunHeartbeatAsync(server, ui, () => consoleLock, logBuffer, logWriter, cts.Token);
-    var brainTask = RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
+    var brainTask = useLifeLoop && lifeLoop is not null
+        ? lifeLoop.RunAsync(cts.Token)
+        : RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
     _ = Task.Run(() => RunCommandLoop(cts, brain, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
 
     await Task.WhenAll(heartbeatTask, brainTask);

@@ -21,7 +21,7 @@
 		</Border>
 		<Grid ColumnDefinitions="680,24,*" RowDefinitions="Auto,*" Margin="0,4,0,0">
 			<TextBlock Grid.Column="0" Text="Trace (last 50)" FontWeight="Bold"/>
-			<TextBlock Grid.Column="2" Text="Logs" FontWeight="Bold"/>
+			<TextBlock Grid.Column="2" Text="Life" FontWeight="Bold"/>
 			<Border Grid.Row="1" Grid.Column="0" BorderThickness="1" Padding="8">
 				<ItemsControl Name="TraceList">
 					<ItemsControl.ItemTemplate>
@@ -32,17 +32,29 @@
 				</ItemsControl>
 			</Border>
 			<GridSplitter Grid.Row="1" Grid.Column="1" Width="6"/>
-			<Border Grid.Row="1" Grid.Column="2" BorderThickness="1" Padding="8" Margin="12,0,0,0">
-				<ScrollViewer>
-					<ItemsControl Name="LogsList">
-						<ItemsControl.ItemTemplate>
-							<DataTemplate>
-								<TextBlock Text="{Binding}" TextWrapping="Wrap"/>
-							</DataTemplate>
-						</ItemsControl.ItemTemplate>
-					</ItemsControl>
-				</ScrollViewer>
-			</Border>
+			<Grid Grid.Row="1" Grid.Column="2" RowDefinitions="Auto,Auto,*" Margin="12,0,0,0">
+				<Border Grid.Row="0" BorderThickness="1" Padding="8">
+					<StackPanel Spacing="4">
+						<TextBlock Name="LifeMoodText" FontWeight="Bold"/>
+						<TextBlock Name="LifeHomeostasisText"/>
+						<TextBlock Name="LifeInstinctsText"/>
+						<TextBlock Name="LifeDecisionText"/>
+						<TextBlock Name="LifeRewardText"/>
+					</StackPanel>
+				</Border>
+				<TextBlock Grid.Row="1" Text="Logs" FontWeight="Bold" Margin="0,8,0,4"/>
+				<Border Grid.Row="2" BorderThickness="1" Padding="8">
+					<ScrollViewer>
+						<ItemsControl Name="LogsList">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate>
+									<TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+					</ScrollViewer>
+				</Border>
+			</Grid>
 		</Grid>
 	</DockPanel>
 </Window>

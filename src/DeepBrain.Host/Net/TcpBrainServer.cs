@@ -15,6 +15,9 @@ public sealed class TcpBrainServer : IAsyncDisposable
     private readonly Func<Task> _onBrainStart;
     private readonly Func<Task> _onBrainStop;
     private readonly Func<Task> _onBrainStep;
+    private readonly Func<Task> _onLifeStart;
+    private readonly Func<Task> _onLifeStop;
+    private readonly Func<Task> _onLifeStep;
     private readonly Func<BrainInputDto, Task> _onInputSet;
     private readonly Func<string, Task> _onEventPush;
 
@@ -23,6 +26,9 @@ public sealed class TcpBrainServer : IAsyncDisposable
         Func<Task> onBrainStart,
         Func<Task> onBrainStop,
         Func<Task> onBrainStep,
+        Func<Task> onLifeStart,
+        Func<Task> onLifeStop,
+        Func<Task> onLifeStep,
         Func<BrainInputDto, Task> onInputSet,
         Func<string, Task> onEventPush)
     {
@@ -31,6 +37,9 @@ public sealed class TcpBrainServer : IAsyncDisposable
         _onBrainStart = onBrainStart;
         _onBrainStop  = onBrainStop;
         _onBrainStep  = onBrainStep;
+        _onLifeStart  = onLifeStart;
+        _onLifeStop   = onLifeStop;
+        _onLifeStep   = onLifeStep;
         _onInputSet   = onInputSet;
         _onEventPush  = onEventPush;
     }
@@ -51,7 +60,7 @@ public sealed class TcpBrainServer : IAsyncDisposable
             catch when (ct.IsCancellationRequested) { break; }
 
             var session = new ClientSession(
-                client, _onBrainStart, _onBrainStop, _onBrainStep, _onInputSet, _onEventPush);
+                client, _onBrainStart, _onBrainStop, _onBrainStep, _onLifeStart, _onLifeStop, _onLifeStep, _onInputSet, _onEventPush);
 
             _sessions.TryAdd(session, 0);
 
@@ -77,6 +86,12 @@ public sealed class TcpBrainServer : IAsyncDisposable
     {
         foreach (var s in _sessions.Keys)
             try { await s.SendStateAsync(state, ct); } catch { }
+    }
+
+    public async Task BroadcastLifeStateAsync(LifeStateDto state, CancellationToken ct)
+    {
+        foreach (var s in _sessions.Keys)
+            try { await s.SendLifeStateAsync(state, ct); } catch { }
     }
 
     public async Task BroadcastTraceAsync(TraceDto trace, CancellationToken ct)
