@@ -1,29 +1,49 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="DeepBrain.Studio.MainWindow"
         Width="900" Height="600"
         Title="DeepBrain Studio">
 	<DockPanel Margin="12">
-		<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
-			<TextBox Name="HostBox" Width="160" Text="127.0.0.1"/>
-			<TextBox Name="PortBox" Width="80" Text="5555"/>
-			<Button Name="ConnectBtn" Content="Connect"/>
-			<Button Name="PingBtn" Content="Ping"/>
-			<Button Name="SubLogsBtn" Content="Subscribe Logs"/>
-			<Button Name="SubStateBtn" Content="Subscribe State"/>
-			<Button Name="ClearBtn" Content="Clear"/>
-			<Button Name="BrainStartBtn" Content="Brain Start"/>
-			<Button Name="BrainStopBtn" Content="Brain Stop"/>
-			<Button Name="BrainStepBtn" Content="Brain Step"/>
-			<Button Name="SubTraceBtn" Content="Subscribe Trace"/>
-
-			<TextBlock Name="StatusText" Margin="12,0,0,0"/>
-		
-		</StackPanel>		
-		<Border Margin="0,12,0,0" BorderThickness="1" Padding="8">
-			<ScrollViewer>
-				<ItemsControl Name="LogsList"/>
-			</ScrollViewer>
+		<Border DockPanel.Dock="Top" Margin="0,0,0,8">
+			<Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto" RowDefinitions="Auto">
+				<TextBlock Name="HeartbeatText" Text="♡" FontSize="16" Margin="0,0,12,0" VerticalAlignment="Center"/>
+				<TextBox Grid.Column="1" Name="HostBox" Width="160" Text="127.0.0.1"/>
+				<TextBox Grid.Column="2" Name="PortBox" Width="80" Text="5555" Margin="8,0,0,0"/>
+				<Button Grid.Column="3" Name="ConnectBtn" Content="Connect" Margin="8,0,0,0"/>
+				<Button Grid.Column="4" Name="DisconnectBtn" Content="Disconnect" Margin="8,0,0,0"/>
+				<TextBlock Grid.Column="5" Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center"/>
+				<StackPanel Grid.Column="6" Orientation="Horizontal" Spacing="8">
+					<Button Name="BrainStartBtn" Content="Start"/>
+					<Button Name="BrainStopBtn" Content="Stop"/>
+					<Button Name="ClearBtn" Content="Clear Logs"/>
+				</StackPanel>
+			</Grid>
 		</Border>
+		<Grid ColumnDefinitions="680,24,*" RowDefinitions="Auto,*" Margin="0,4,0,0">
+			<TextBlock Grid.Column="0" Text="Trace (last 50)" FontWeight="Bold"/>
+			<TextBlock Grid.Column="2" Text="Logs" FontWeight="Bold"/>
+			<Border Grid.Row="1" Grid.Column="0" BorderThickness="1" Padding="8">
+				<ItemsControl Name="TraceList">
+					<ItemsControl.ItemTemplate>
+						<DataTemplate>
+							<TextBlock Text="{Binding}" TextWrapping="NoWrap" FontFamily="Consolas"/>
+						</DataTemplate>
+					</ItemsControl.ItemTemplate>
+				</ItemsControl>
+			</Border>
+			<GridSplitter Grid.Row="1" Grid.Column="1" Width="6"/>
+			<Border Grid.Row="1" Grid.Column="2" BorderThickness="1" Padding="8" Margin="12,0,0,0">
+				<ScrollViewer>
+					<ItemsControl Name="LogsList">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate>
+								<TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+				</ScrollViewer>
+			</Border>
+		</Grid>
 	</DockPanel>
 </Window>
+

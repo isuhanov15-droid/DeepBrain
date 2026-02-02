@@ -13,6 +13,8 @@ public sealed class TcpClientService : IAsyncDisposable
     private TcpClient? _client;
     private NetworkStream? _stream;
     private CancellationTokenSource? _cts;
+    private TaskCompletionSource<bool>? _pongTcs;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public bool IsConnected => _client?.Connected == true;
 
@@ -26,12 +28,20 @@ public sealed class TcpClientService : IAsyncDisposable
     {
         _cts = new CancellationTokenSource();
         _client = new TcpClient();
-        await _client.ConnectAsync(host, port);
-        _stream = _client.GetStream();
+        try
+        {
+            await _client.ConnectAsync(host, port);
+            _stream = _client.GetStream();
 
-        OnInfo?.Invoke($"Connected to {host}:{port}");
+            OnInfo?.Invoke($"Connected to {host}:{port}");
 
-        _ = Task.Run(() => ReadLoopAsync(_cts.Token));
+            _ = Task.Run(() => ReadLoopAsync(_cts.Token));
+        }
+        catch (Exception ex)
+        {
+            OnInfo?.Invoke($"Connect error: {ex.Message}");
+            await DisconnectAsync();
+        }
     }
 
     public async Task SubscribeLogsAsync()
@@ -50,13 +60,25 @@ public sealed class TcpClientService : IAsyncDisposable
         await SendAsync(env, _cts?.Token ?? CancellationToken.None);
     }
 
+    public async Task<bool> PingWithTimeoutAsync(int timeoutMs = 1000)
+    {
+        if (_stream is null) return false;
+
+        _pongTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await PingAsync();
+
+        using var cts = new CancellationTokenSource(timeoutMs);
+        await using var reg = cts.Token.Register(() => _pongTcs.TrySetResult(false));
+        return await _pongTcs.Task;
+    }
+
     private async Task ReadLoopAsync(CancellationToken ct)
     {
         try
         {
             while (!ct.IsCancellationRequested && _stream is not null)
             {
-                var frame = await Framing.ReadFrameAsync(_stream, 1_000_000, ct);
+                var frame = await Framing.ReadFrameAsync(_stream, 10_000_000, ct);
                 if (frame is null) break;
 
                 var env = JsonWire.Deserialize(frame);
@@ -66,7 +88,7 @@ public sealed class TcpClientService : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            OnInfo?.Invoke($"ReadLoop error: {ex.Message}");
+            OnInfo?.Invoke($"ReadLoop error: {ex}");
         }
         finally
         {
@@ -78,35 +100,41 @@ public sealed class TcpClientService : IAsyncDisposable
 
     private void HandleIncoming(Envelope env)
     {
-        switch (env.Type)
+        try
         {
-            case Msg.LogAppend:
-                if (env.Payload is JsonElement je && je.TryGetProperty("text", out var t))
-                    OnLog?.Invoke(t.GetString() ?? "");
-                else
-                    OnLog?.Invoke(env.Payload?.ToString() ?? "(log)");
-                break;
+            switch (env.Type)
+            {
+                case Msg.LogAppend:
+                    if (env.Payload is JsonElement je && je.TryGetProperty("text", out var t))
+                        OnLog?.Invoke(t.GetString() ?? "");
+                    else
+                        OnLog?.Invoke(env.Payload?.ToString() ?? "(log)");
+                    break;
 
             case Msg.Pong:
                 OnInfo?.Invoke("pong ✅");
+                _pongTcs?.TrySetResult(true);
                 break;
 
+                case Msg.BrainState:
+                    if (env.Payload is JsonElement s)
+                    {
+                        long tick = s.TryGetProperty("tick", out var tickEl) ? tickEl.GetInt64() : 0;
+                        long uptime = s.TryGetProperty("uptimeMs", out var u) ? u.GetInt64() : 0;
+                        string mode = s.TryGetProperty("mode", out var m) ? (m.GetString() ?? "") : "";
+                        string decision = s.TryGetProperty("lastDecision", out var d) ? (d.GetString() ?? "") : "";
+                        OnState?.Invoke(tick, uptime, mode, decision);
+                    }
+                    break;
 
-            case Msg.BrainState:
-
-                if (env.Payload is JsonElement s)
-                {
-                    long tick = s.TryGetProperty("tick", out var tickEl) ? tickEl.GetInt64() : 0;
-                    long uptime = s.TryGetProperty("uptimeMs", out var u) ? u.GetInt64() : 0;
-                    string mode = s.TryGetProperty("mode", out var m) ? (m.GetString() ?? "") : "";
-                    string decision = s.TryGetProperty("lastDecision", out var d) ? (d.GetString() ?? "") : "";
-                    OnState?.Invoke(tick, uptime, mode, decision);
-                }
-                break;
-            case Msg.TraceAppend:
-                OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
-                break;
-
+                case Msg.TraceAppend:
+                    OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            OnInfo?.Invoke($"HandleIncoming error: {ex.Message}");
         }
     }
 
@@ -114,8 +142,21 @@ public sealed class TcpClientService : IAsyncDisposable
     private async Task SendAsync(Envelope env, CancellationToken ct)
     {
         if (_stream is null) return;
-        var bytes = JsonWire.Serialize(env);
-        await Framing.WriteFrameAsync(_stream, bytes, ct);
+        await _sendLock.WaitAsync(ct);
+        try
+        {
+            var bytes = JsonWire.Serialize(env);
+            await Framing.WriteFrameAsync(_stream, bytes, ct);
+        }
+        catch (Exception ex)
+        {
+            OnInfo?.Invoke($"Send error: {ex.Message}");
+            await DisconnectAsync();
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     public async Task DisconnectAsync()

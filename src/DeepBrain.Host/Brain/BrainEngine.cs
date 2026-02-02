@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using DeepBrain.Host.Brain.Act;
+using DeepBrain.Host.Brain.Input;
 using DeepBrain.Host.Brain.Perception;
 using DeepBrain.Host.Brain.Policy;
 using DeepBrain.Host.Brain.State;
@@ -9,95 +11,73 @@ namespace DeepBrain.Host.Brain;
 
 public sealed class BrainEngine
 {
-    private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
-
-    private long _tick;
-    private bool _isRunning;
-    private string _mode = "idle";
-    private string _lastDecision = "none";
-
-    // Модули
+    private readonly InputStore _input;
     private readonly PerceptionEngine _perception = new();
     private readonly StateEstimator _stateEstimator = new();
     private readonly PolicyEngine _policy = new();
     private readonly Actuator _actuator = new();
 
-    private readonly DeepBrain.Host.Brain.Input.InputStore _inputs = new();
-    public DeepBrain.Shared.Input.BrainInputDto GetInputSnapshot() => _inputs.GetSnapshot();
-    public void SetInput(DeepBrain.Shared.Input.BrainInputDto input) => _inputs.Set(input);
-    public void PatchInput(float? stress = null, float? energy = null, float? focus = null, string? goal = null, string? command = null)
-        => _inputs.Patch(stress, energy, focus, goal, command);
+    private readonly ConcurrentQueue<string> _events = new();
+    private readonly BrainStateInternal _state = new();
 
+    private long _tick = 0;
+    private readonly long _startedMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-    public bool IsRunning => _isRunning;
+    private string _mode = "stopped";
+    private string _lastDecision = "none";
+    private ActResult? _lastAct;
 
-    public void Start()
+    public BrainEngine(InputStore input) => _input = input;
+
+    public void Start() => _mode = "running";
+    public void Stop()  => _mode = "stopped";
+
+    public BrainStateDto GetState() => new(
+        Tick: _tick,
+        UptimeMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - _startedMs,
+        Mode: _mode,
+        LastDecision: _lastDecision
+    );
+
+    public List<TraceDto> TickWithTrace(bool isForced)
     {
-        _isRunning = true;
-        _mode = "running";
-    }
+        var traces = new List<TraceDto>(8);
 
-    public void Stop()
-    {
-        _isRunning = false;
-        _mode = "idle";
-    }
-    public void Step(bool isForced = false)
-    {
-        // Совместимость: Step вызывает тик, но trace не наружу
-        foreach (var _ in TickWithTrace(isForced))
-        {
-            // намеренно игнорируем trace
-        }
-    }
-
-    // Если хочешь удобно собирать trace в Program.cs:
-    public List<TraceDto> StepWithTrace(bool isForced = false)
-    {
-        return TickWithTrace(isForced).ToList();
-    }
-
-
-    public BrainStateDto GetState()
-    {
-        var uptimeMs = (long)(DateTimeOffset.UtcNow - _startedAt).TotalMilliseconds;
-        return new BrainStateDto(_tick, uptimeMs, _mode, _lastDecision);
-    }
-
-    public IEnumerable<TraceDto> TickWithTrace(bool isForced = false)
-    {
-        if (!_isRunning && !isForced)
-            yield break;
+        if (_mode != "running" && !isForced)
+            return traces;
 
         _tick++;
 
-        // 1) Perception
-        var input = _inputs.GetSnapshot();
-        var percept = _perception.Sense(_tick, input);
+        var evs = DrainEvents(max: 32);
+        var input = _input.GetSnapshot();
 
-        yield return new TraceDto(_tick, "perception", new
-        {
-            timeUtc = percept.TimeUtc,
-            input = new { input.Stress, input.Energy, input.Focus, input.Goal, input.Command }
-        });
+        var (percept, drives) = _perception.Sense(_tick, input, evs);
+        traces.Add(new TraceDto(_tick, "perception", new { timeUtc = percept.TimeUtc, input, events = evs }));
 
-        // 2) State estimation
-        var state = _stateEstimator.Estimate(_mode, _tick);
-        yield return new TraceDto(_tick, "state", new { mode = state.Mode });
+        _stateEstimator.UpdateHomeostasis(_state, drives, _lastAct);
+        traces.Add(new TraceDto(_tick, "state", new { mode = _mode, stress = _state.Stress, energy = _state.Energy, focus = _state.Focus, mood = _state.Mood }));
 
-        // 3) Policy decision
-        var decision = _policy.Decide(percept, state);
+        var decision = _policy.Decide(percept, _state);
         _lastDecision = decision.Name;
-        yield return new TraceDto(_tick, "policy", new
-        {
-            decision = decision.Name,
-            confidence = decision.Confidence,
-            reason = decision.Reason
-        });
-        // 4) Act
-        var act = _actuator.Act(decision.Name);
-        yield return new TraceDto(_tick, "act", new { done = act.Done });
+        traces.Add(new TraceDto(_tick, "policy", new { decision = decision.Name, confidence = decision.Confidence, reason = decision.Reason }));
 
+        _lastAct = _actuator.Act(decision.Name);
+        traces.Add(new TraceDto(_tick, "act", new { done = _lastAct.Done }));
 
+        return traces;
+    }
+
+    public void EnqueueEvent(string name)
+    {
+        if (!string.IsNullOrWhiteSpace(name))
+            _events.Enqueue(name.Trim().ToLowerInvariant());
+    }
+
+    private List<string> DrainEvents(int max)
+    {
+        var list = new List<string>(Math.Min(max, 16));
+        while (list.Count < max && _events.TryDequeue(out var ev))
+            list.Add(ev);
+        return list;
     }
 }

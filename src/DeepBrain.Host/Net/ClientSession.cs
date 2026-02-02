@@ -1,8 +1,9 @@
-﻿using System.Net.Sockets;
+﻿using System.Net;
+using System.Net.Sockets;
 using DeepBrain.Shared.Net;
-using System.Text.Json;
+using DeepBrain.Shared.Trace;
+using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.Input;
-
 
 namespace DeepBrain.Host.Net;
 
@@ -10,57 +11,61 @@ public sealed class ClientSession : IAsyncDisposable
 {
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
-    private readonly CancellationTokenSource _cts = new();
+
     private readonly Func<Task> _onBrainStart;
     private readonly Func<Task> _onBrainStop;
     private readonly Func<Task> _onBrainStep;
-    private readonly Func<string, Task> _onInfo;
     private readonly Func<BrainInputDto, Task> _onInputSet;
-    public string Remote => _client.Client.RemoteEndPoint?.ToString() ?? "unknown";
-    public bool WantsLogs { get; private set; }
-    public bool WantsState { get; private set; }
-    public bool WantsTrace { get; private set; }
+    private readonly Func<string, Task> _onEventPush;
 
+    private bool _wantsLogs;
+    private bool _wantsState;
+    private bool _wantsTrace;
 
-    public ClientSession(TcpClient client, Func<string, Task> onInfo, Func<Task> onBrainStart, Func<Task> onBrainStop, Func<Task> onBrainStep, Func<BrainInputDto, Task> onInputSet)
+    public EndPoint Remote => _client.Client.RemoteEndPoint!;
+
+    public ClientSession(
+        TcpClient client,
+        Func<Task> onBrainStart,
+        Func<Task> onBrainStop,
+        Func<Task> onBrainStep,
+        Func<BrainInputDto, Task> onInputSet,
+        Func<string, Task> onEventPush)
     {
         _client = client;
-        _onInfo = onInfo;
         _stream = client.GetStream();
+
         _onBrainStart = onBrainStart;
         _onBrainStop = onBrainStop;
         _onBrainStep = onBrainStep;
         _onInputSet = onInputSet;
+        _onEventPush = onEventPush;
     }
 
-
-    public async Task RunAsync(Func<string, Task> onInfo, CancellationToken serverCt)
+    public async Task RunAsync(Func<string, Task> onInfo, CancellationToken ct)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(serverCt, _cts.Token);
-        var ct = linked.Token;
+        await onInfo($"+ client {Remote}");
 
-        await _onInfo($"Client connected: {Remote}");
-
-        try
+        while (!ct.IsCancellationRequested)
         {
-            while (!ct.IsCancellationRequested)
+            const int MaxEnvelopeBytes = 1_000_000;
+            Envelope? env;
+            try
             {
-                var frame = await Framing.ReadFrameAsync(_stream, maxBytes: 1_000_000, ct);
-                if (frame is null) break;
-
-                var env = JsonWire.Deserialize(frame);
-                await HandleAsync(env, onInfo, ct);
+                env = await Framing.ReadEnvelopeAsync(_stream, MaxEnvelopeBytes, ct);
             }
+            catch (Exception ex)
+            {
+                await onInfo($"ReadEnvelope error from {Remote}: {ex.Message}");
+                break;
+            }
+
+            if (env is null) break;
+
+            await HandleAsync(env, onInfo, ct);
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            await onInfo($"Client {Remote} error: {ex.Message}");
-        }
-        finally
-        {
-            await onInfo($"Client disconnected: {Remote}");
-        }
+
+        await onInfo($"- client {Remote}");
     }
 
     private async Task HandleAsync(Envelope env, Func<string, Task> onInfo, CancellationToken ct)
@@ -68,18 +73,24 @@ public sealed class ClientSession : IAsyncDisposable
         switch (env.Type)
         {
             case Msg.Ping:
-                await SendAsync(new Envelope(Msg.Pong, env.Id, NowMs(), new { ok = true }), ct);
+                await SendAsync(new Envelope(Msg.Pong, Array.Empty<byte>()), ct);
                 break;
 
             case Msg.LogsSubscribe:
-                WantsLogs = true;
-                await SendAsync(new Envelope(Msg.LogAppend, Guid.NewGuid().ToString("N"), NowMs(),
-                    new { text = $"[{DateTime.Now:HH:mm:ss}] logs subscribed ✅" }), ct);
+                _wantsLogs = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] logs subscribed ✅", ct);
                 break;
+
             case Msg.BrainStateSubscribe:
-                WantsState = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] state subscribed 🧠", ct);
+                _wantsState = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] state subscribed ✅", ct);
                 break;
+
+            case Msg.TraceSubscribe:
+                _wantsTrace = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] trace subscribed ✅", ct);
+                break;
+
             case Msg.BrainStart:
                 await _onBrainStart();
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.start ✅", ct);
@@ -87,92 +98,63 @@ public sealed class ClientSession : IAsyncDisposable
 
             case Msg.BrainStop:
                 await _onBrainStop();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.stop 🛑", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.stop ✅", ct);
                 break;
 
             case Msg.BrainStep:
                 await _onBrainStep();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.step 👣", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.step ✅", ct);
                 break;
 
-            case Msg.TraceSubscribe:
-                WantsTrace = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] trace subscribed 🔬", ct);
-                break;
             case Msg.InputSet:
                 {
-                    var input = DeepBrain.Shared.Net.PayloadReader.Read<BrainInputDto>(env.Payload);
+                    var input = PayloadReader.Read<BrainInputDto>(env.Payload);
                     await _onInputSet(input);
                     await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] input.set ✅", ct);
                     break;
                 }
 
-
-
+            case Msg.EventPush:
+                {
+                    var ev = PayloadReader.Read<BrainEventDto>(env.Payload);
+                    await _onEventPush(ev.Name);
+                    await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] event.push '{ev.Name}' ✅", ct);
+                    break;
+                }
 
             default:
-                await _onInfo($"Unknown msg from {Remote}: {env.Type}");
+                await onInfo($"Unknown msg from {Remote}: {env.Type}");
                 break;
         }
     }
 
-    static BrainInputDto ReadInput(object? payload)
+    public async Task SendLogAsync(string line, CancellationToken ct)
     {
-        if (payload is null)
-            throw new InvalidOperationException("input.set payload is null");
-
-        // 1) Если пришёл как JsonElement (часто так и будет)
-        if (payload is JsonElement je)
-            return je.Deserialize<BrainInputDto>()
-                   ?? throw new InvalidOperationException("input.set payload: cannot deserialize BrainInputDto");
-
-        // 2) Если пришёл как строка JSON
-        if (payload is string s)
-            return JsonSerializer.Deserialize<BrainInputDto>(s)
-                   ?? throw new InvalidOperationException("input.set payload: cannot deserialize from string");
-
-        // 3) На всякий случай: если это уже BrainInputDto
-        if (payload is BrainInputDto dto)
-            return dto;
-
-        // 4) Последний шанс: сериализуем обратно и читаем
-        var json = JsonSerializer.Serialize(payload);
-        return JsonSerializer.Deserialize<BrainInputDto>(json)
-               ?? throw new InvalidOperationException("input.set payload: cannot deserialize from object");
+        if (!_wantsLogs) return;
+        var payload = PayloadWriter.Write(new LogAppendDto(line));
+        await SendAsync(new Envelope(Msg.LogAppend, payload), ct);
     }
 
-    public async Task SendLogAsync(string text, CancellationToken ct)
+    public async Task SendStateAsync(BrainStateDto state, CancellationToken ct)
     {
-        if (!WantsLogs) return;
-        await SendAsync(new Envelope(Msg.LogAppend, Guid.NewGuid().ToString("N"), NowMs(), new { text }), ct);
+        if (!_wantsState) return;
+        var payload = PayloadWriter.Write(state);
+        await SendAsync(new Envelope(Msg.BrainState, payload), ct);
     }
 
-    public async Task SendAsync(Envelope env, CancellationToken ct)
+    public async Task SendTraceAsync(TraceDto trace, CancellationToken ct)
     {
-        var bytes = JsonWire.Serialize(env);
-        await Framing.WriteFrameAsync(_stream, bytes, ct);
+        if (!_wantsTrace) return;
+        var payload = PayloadWriter.Write(trace);
+        await SendAsync(new Envelope(Msg.TraceAppend, payload), ct);
     }
 
-    public void Stop() => _cts.Cancel();
+    private Task SendAsync(Envelope env, CancellationToken ct) => Framing.WriteEnvelopeAsync(_stream, env, ct);
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        try { _cts.Cancel(); } catch { }
-        try { _stream.Close(); } catch { }
-        try { _client.Close(); } catch { }
-        _cts.Dispose();
-        await Task.CompletedTask;
+        try { _stream.Dispose(); } catch { }
+        try { _client.Dispose(); } catch { }
+        return ValueTask.CompletedTask;
     }
-    public async Task SendStateAsync(object payload, CancellationToken ct)
-    {
-        if (!WantsState) return;
-        await SendAsync(new Envelope(Msg.BrainState, Guid.NewGuid().ToString("N"), NowMs(), payload), ct);
-    }
-    public async Task SendTraceAsync(object payload, CancellationToken ct)
-    {
-        if (!WantsTrace) return;
-        await SendAsync(new Envelope(Msg.TraceAppend, Guid.NewGuid().ToString("N"), NowMs(), payload), ct);
-    }
-
-    private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }

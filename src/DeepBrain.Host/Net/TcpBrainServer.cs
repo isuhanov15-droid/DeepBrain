@@ -1,126 +1,96 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using DeepBrain.Shared.Net;
+using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.Input;
+using DeepBrain.Shared.Trace;
+
 namespace DeepBrain.Host.Net;
 
 public sealed class TcpBrainServer : IAsyncDisposable
 {
     private readonly TcpListener _listener;
-    private readonly List<ClientSession> _clients = new();
-    private readonly object _lock = new();
+    private readonly ConcurrentDictionary<ClientSession, byte> _sessions = new();
 
     private readonly Func<Task> _onBrainStart;
     private readonly Func<Task> _onBrainStop;
     private readonly Func<Task> _onBrainStep;
     private readonly Func<BrainInputDto, Task> _onInputSet;
-
-
-    public int Port { get; }
+    private readonly Func<string, Task> _onEventPush;
 
     public TcpBrainServer(
-    int port,
-    Func<Task> onBrainStart,
-    Func<Task> onBrainStop,
-    Func<Task> onBrainStep,
-    Func<BrainInputDto, Task> onInputSet)
-{
-    Port = port;
-    _listener = new TcpListener(IPAddress.Loopback, port);
-
-    _onBrainStart = onBrainStart;
-    _onBrainStop  = onBrainStop;
-    _onBrainStep  = onBrainStep;
-    _onInputSet   = onInputSet;
-}
-
-
-
-    public void Start() => _listener.Start();
-
-    public async Task RunAcceptLoopAsync(Func<string, Task> onInfo, CancellationToken ct)
+        int port,
+        Func<Task> onBrainStart,
+        Func<Task> onBrainStop,
+        Func<Task> onBrainStep,
+        Func<BrainInputDto, Task> onInputSet,
+        Func<string, Task> onEventPush)
     {
-        await onInfo($"Host listening on 127.0.0.1:{Port}");
+        _listener = new TcpListener(IPAddress.Loopback, port);
 
+        _onBrainStart = onBrainStart;
+        _onBrainStop  = onBrainStop;
+        _onBrainStep  = onBrainStep;
+        _onInputSet   = onInputSet;
+        _onEventPush  = onEventPush;
+    }
+
+    public Task StartAsync(CancellationToken ct)
+    {
+        _listener.Start();
+        _ = AcceptLoopAsync(ct);
+        return Task.CompletedTask;
+    }
+
+    private async Task AcceptLoopAsync(CancellationToken ct)
+    {
         while (!ct.IsCancellationRequested)
         {
-            TcpClient client = await _listener.AcceptTcpClientAsync(ct);
+            TcpClient client;
+            try { client = await _listener.AcceptTcpClientAsync(ct); }
+            catch when (ct.IsCancellationRequested) { break; }
+
             var session = new ClientSession(
-    client,
-    onInfo: onInfo,
-    onBrainStart: _onBrainStart,
-    onBrainStop: _onBrainStop,
-    onBrainStep: _onBrainStep,
-    onInputSet: _onInputSet
-);
+                client, _onBrainStart, _onBrainStop, _onBrainStep, _onInputSet, _onEventPush);
 
-
-
-
-            lock (_lock) _clients.Add(session);
+            _sessions.TryAdd(session, 0);
 
             _ = Task.Run(async () =>
             {
-                try
-                {
-                    await session.RunAsync(onInfo, ct);
-                }
+                try { await session.RunAsync(BroadcastLogAsync, ct); }
                 finally
                 {
-                    lock (_lock) _clients.Remove(session);
+                    _sessions.TryRemove(session, out _);
                     await session.DisposeAsync();
                 }
             }, ct);
         }
     }
 
-    public async Task BroadcastLogAsync(string text, CancellationToken ct)
+    public async Task BroadcastLogAsync(string line)
     {
-        List<ClientSession> snapshot;
-        lock (_lock) snapshot = _clients.ToList();
-
-        foreach (var c in snapshot)
-        {
-            try { await c.SendLogAsync(text, ct); }
-            catch { /* ������ ����� ����������, �� ������������� */ }
-        }
+        foreach (var s in _sessions.Keys)
+            try { await s.SendLogAsync(line, CancellationToken.None); } catch { }
     }
 
-    public async ValueTask DisposeAsync()
+    public async Task BroadcastStateAsync(BrainStateDto state, CancellationToken ct)
+    {
+        foreach (var s in _sessions.Keys)
+            try { await s.SendStateAsync(state, ct); } catch { }
+    }
+
+    public async Task BroadcastTraceAsync(TraceDto trace, CancellationToken ct)
+    {
+        foreach (var s in _sessions.Keys)
+            try { await s.SendTraceAsync(trace, ct); } catch { }
+    }
+
+    public ValueTask DisposeAsync()
     {
         try { _listener.Stop(); } catch { }
-
-        List<ClientSession> snapshot;
-        lock (_lock) snapshot = _clients.ToList();
-        foreach (var c in snapshot)
-        {
-            try { c.Stop(); await c.DisposeAsync(); } catch { }
-        }
+        foreach (var s in _sessions.Keys)
+            try { s.DisposeAsync(); } catch { }
+        _sessions.Clear();
+        return ValueTask.CompletedTask;
     }
-    public async Task BroadcastStateAsync(object payload, CancellationToken ct)
-    {
-        List<ClientSession> snapshot;
-        lock (_lock) snapshot = _clients.ToList();
-
-        foreach (var c in snapshot)
-        {
-            try { await c.SendStateAsync(payload, ct); }
-            catch { }
-        }
-    }
-    public async Task BroadcastTraceAsync(object payload, CancellationToken ct)
-    {
-        List<ClientSession> snapshot;
-        lock (_lock) snapshot = _clients.ToList();
-
-        foreach (var c in snapshot)
-        {
-            try { await c.SendTraceAsync(payload, ct); } catch { }
-        }
-    }
-
-
 }

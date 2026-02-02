@@ -18,5 +18,7 @@ public static class Msg
     public const string InputSet = "input.set";
     public const string InputGet = "input.get";          // опционально
     public const string InputSnapshot = "input.snapshot"; // опционально
+    public const string EventPush = "event.push";
+
 
 }

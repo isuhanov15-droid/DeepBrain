@@ -37,6 +37,20 @@ public static class Framing
         await ReadExactlyAsync(stream, payload, ct).ConfigureAwait(false);
         return payload;
     }
+    public static async Task WriteEnvelopeAsync(Stream stream, Envelope env, CancellationToken ct = default)
+    {
+        var bytes = JsonWire.Serialize(env);
+        await WriteFrameAsync(stream, bytes, ct).ConfigureAwait(false);
+    }
+
+    public static async Task<Envelope?> ReadEnvelopeAsync(Stream stream, int maxBytes, CancellationToken ct = default)
+    {
+        var bytes = await ReadFrameAsync(stream, maxBytes, ct).ConfigureAwait(false);
+        if (bytes is null) return null;
+        return JsonWire.Deserialize(bytes);
+    }
+
+
 
     private static async Task<int> ReadUpToAsync(Stream stream, byte[] buffer, CancellationToken ct)
     {
