@@ -213,6 +213,8 @@ public partial class MainWindow : Window
             }
 
             LifeActiveHabitText.Text = $"activeHabit={state.Character.ActiveHabitId ?? "n/a"} influence={state.Character.HabitInfluence:0.00}";
+            LifeEmitText.Text = $"emitCooldown={state.Character.EmitCooldownRemaining} lastEmitTick={state.Character.LastEmitTick}";
+            LifeConsumedText.Text = $"consumedEvents={state.Character.ConsumedEventsCount}";
         }
         else
         {
@@ -220,6 +222,8 @@ public partial class MainWindow : Window
             LifePersonalityText.Text = "persona=n/a";
             LifeHabitsText.Text = "habits=n/a";
             LifeActiveHabitText.Text = "activeHabit=n/a";
+            LifeEmitText.Text = "emitCooldown=n/a";
+            LifeConsumedText.Text = "consumedEvents=n/a";
         }
     }
 

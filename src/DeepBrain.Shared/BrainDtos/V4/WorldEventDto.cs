@@ -6,5 +6,6 @@ public sealed record WorldEventDto(
     double Severity,
     string Payload,
     double AgeSeconds,
-    double Salience
+    double Salience,
+    bool Consumed
 );

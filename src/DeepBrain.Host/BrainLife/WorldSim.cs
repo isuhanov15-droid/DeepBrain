@@ -71,7 +71,7 @@ public sealed class WorldSim
     private DeepBrain.Shared.BrainDtos.V4.WorldEventDto MakeEvent(long tick, string type, double severity, string payload)
     {
         var sev = LifeMath.Clamp01(severity);
-        return new DeepBrain.Shared.BrainDtos.V4.WorldEventDto(tick, type, sev, payload, 0.0, sev);
+        return new DeepBrain.Shared.BrainDtos.V4.WorldEventDto(tick, type, sev, payload, 0.0, sev, false);
     }
 
     private void ApplyEvent(DeepBrain.Shared.BrainDtos.V4.WorldEventDto ev)

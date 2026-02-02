@@ -35,6 +35,7 @@ public sealed class LifeLoop
     private readonly PersonalityProfile _personality = PersonalityProfile.LoadLada();
     private readonly VoiceModeResolver _voice = new();
     private readonly HabitSystem _habits = new();
+    private readonly MessageDedupeGuard _dedupe = new();
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
 
@@ -158,7 +159,10 @@ public sealed class LifeLoop
                     _habits.GetTopHabits(5),
                     null,
                     0.0,
-                    "calm"
+                    "calm",
+                    0,
+                    _cooldowns.GetLastTick("emit_message"),
+                    _world.Events.ConsumedCount
                 )
             );
             _broadcast(stateSleep, ct);
@@ -199,7 +203,13 @@ public sealed class LifeLoop
         var cueKey = _habits.ComputeCue(attention, circ, _loop, recentEvents, _homeo);
         var (habitAction, habitStrength, habitId) = _habits.Suggest(cueKey);
         var habitInfluence = _habits.ComputeInfluence(_personality.Persona, habitStrength);
+        if (habitAction is null)
+            habitInfluence = 0.0;
+        habitInfluence = Math.Min(0.4, habitInfluence);
+        if (_loop.LoopPenalty > 0.4)
+            habitInfluence *= 0.7;
         var voiceMode = _voice.Resolve(_personality.Persona, _affect, instincts, circ);
+        var emitCooldown = ComputeEmitCooldownTicks(voiceMode, _personality.Persona.AttachmentBaseline);
 
         var (action, reason, strategy) = _selector.Choose(
             _homeo,
@@ -213,6 +223,7 @@ public sealed class LifeLoop
             habitAction,
             habitStrength,
             habitInfluence,
+            emitCooldown,
             dominantDrive,
             activePlan?.Strategy,
             attention.Focus1,
@@ -263,10 +274,32 @@ public sealed class LifeLoop
         if (!string.IsNullOrWhiteSpace(outcome.Message))
         {
             var msg = FormatOutputMessage(outcome.Message!.Trim(), action.Name, voiceMode);
-            _log($"[life] OUTPUT: {msg}");
-            EmitTrace("output", new { message = msg, actionName = action.Name }, ct);
-            _outputSinceDiag = msg;
-            _output(new LifeOutputDto(_tick, DateTimeOffset.Now, msg, action.Name), ct);
+            if (_dedupe.ShouldPublish(_tick, msg))
+            {
+                _log($"[life] OUTPUT: {msg}");
+                EmitTrace("output", new { message = msg, actionName = action.Name }, ct);
+                _outputSinceDiag = msg;
+                _output(new LifeOutputDto(_tick, DateTimeOffset.Now, msg, action.Name), ct);
+            }
+        }
+
+        if (action.Name == "emit_message")
+        {
+            var count = _world.Events.Consume(e => e.Type == "social_ping" && e.Salience > 0.3);
+            if (count > 0)
+                _log($"EVENT_CONSUMED social_ping tick={_tick}");
+        }
+        else if (action.Name == "explore_signal")
+        {
+            var count = _world.Events.Consume(e => (e.Type == "calm_window" || e.Type == "novelty_opportunity") && e.Salience > 0.3);
+            if (count > 0)
+                _log($"EVENT_CONSUMED explore_window tick={_tick}");
+        }
+        else if (action.Name == "breathe_slow" && attention.Focus1 == "threat")
+        {
+            var count = _world.Events.Consume(e => e.Type == "threat_spike" && e.Salience > 0.3);
+            if (count > 0)
+                _log($"EVENT_CONSUMED threat_spike tick={_tick}");
         }
 
         var policy = new DeepBrain.Shared.BrainDtos.V2.PolicyContextDto(
@@ -279,6 +312,7 @@ public sealed class LifeLoop
             _loop.AvgRewardShort
         );
 
+        var emitRemaining = Math.Max(0, emitCooldown - (int)(_tick - _cooldowns.GetLastTick("emit_message")));
         var state = new LifeStateDto(
             _tick,
             DateTimeOffset.Now,
@@ -301,7 +335,10 @@ public sealed class LifeLoop
                 _habits.GetTopHabits(5),
                 habitId,
                 habitInfluence,
-                voiceMode
+                voiceMode,
+                emitRemaining,
+                _cooldowns.GetLastTick("emit_message"),
+                _world.Events.ConsumedCount
             )
         );
 
@@ -322,6 +359,9 @@ public sealed class LifeLoop
             _goals.ApplyGoalSatisfaction(activePlan.GoalId, reward > 0 ? 0.05 : -0.02);
 
         _broadcast(state, ct);
+
+        foreach (var change in _habits.ApplyDecay(_tick))
+            _log($"HABIT_DECAY: {change.before.Id} {change.before.Strength:0.00}->{change.after.Strength:0.00}");
 
         if (_tick < DiagnosticTicks && _tick % 50 == 0)
         {
@@ -393,6 +433,21 @@ public sealed class LifeLoop
         }
 
         return message;
+    }
+
+    private static int ComputeEmitCooldownTicks(string voiceMode, double attachmentBaseline)
+    {
+        var baseCooldown = voiceMode switch
+        {
+            "tender" => 35,
+            "fiery" => 60,
+            "witty" => 50,
+            _ => 45
+        };
+
+        var adjust = (0.5 - attachmentBaseline) * 40.0;
+        var value = (int)Math.Round(baseCooldown + adjust);
+        return Math.Clamp(value, 30, 80);
     }
 
     private void AppendEpisode(EpisodeDto episode)

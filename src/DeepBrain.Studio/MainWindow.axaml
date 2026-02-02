@@ -55,6 +55,8 @@
 						<TextBlock Name="LifePersonalityText"/>
 						<TextBlock Name="LifeHabitsText"/>
 						<TextBlock Name="LifeActiveHabitText"/>
+						<TextBlock Name="LifeEmitText"/>
+						<TextBlock Name="LifeConsumedText"/>
 					</StackPanel>
 				</Border>
 				<TextBlock Grid.Row="1" Text="Outputs" FontWeight="Bold" Margin="0,8,0,4"/>

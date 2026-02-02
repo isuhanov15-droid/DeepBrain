@@ -11,6 +11,11 @@ public sealed class ActionCooldowns
         return tick - last < cooldownTicks;
     }
 
+    public long GetLastTick(string actionName)
+    {
+        return _lastTick.TryGetValue(actionName, out var last) ? last : -1;
+    }
+
     public void Mark(string actionName, long tick)
     {
         _lastTick[actionName] = tick;

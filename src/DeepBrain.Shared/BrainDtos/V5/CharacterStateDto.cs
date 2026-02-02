@@ -5,5 +5,8 @@ public sealed record CharacterStateDto(
     IReadOnlyList<HabitDto> HabitsTop,
     string? ActiveHabitId,
     double HabitInfluence,
-    string VoiceMode
+    string VoiceMode,
+    int EmitCooldownRemaining,
+    long LastEmitTick,
+    int ConsumedEventsCount
 );

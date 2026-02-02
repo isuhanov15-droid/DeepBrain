@@ -19,6 +19,7 @@ public sealed class ActionSelector
         string? habitAction,
         double habitStrength,
         double habitInfluence,
+        int emitCooldownTicks,
         string dominantDrive,
         string? planStrategy,
         string attentionFocus,
@@ -60,8 +61,8 @@ public sealed class ActionSelector
         ApplyMemoryBias(list, memory, homeo, affect);
         ApplyAttentionBias(list, attentionFocus);
         ApplySemanticBias(list, semantic, semanticKey);
-        ApplyHabitBias(list, habitAction, habitStrength, habitInfluence, cooldowns, tick);
-        ApplyCooldowns(list, cooldowns, tick);
+        ApplyHabitBias(list, habitAction, habitStrength, habitInfluence, cooldowns, tick, emitCooldownTicks);
+        ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks);
 
         if (list.Count == 0)
             list.Add(Make("internal", "rest_short", 0.1 + (1 - homeo.Energy), "cooldown_fallback", learning));
@@ -184,10 +185,12 @@ public sealed class ActionSelector
         double habitStrength,
         double habitInfluence,
         ActionCooldowns cooldowns,
-        long tick)
+        long tick,
+        int emitCooldownTicks)
     {
         if (string.IsNullOrWhiteSpace(habitAction)) return;
-        if (cooldowns.IsOnCooldown(habitAction, tick, 2)) return;
+        var cooldown = habitAction == "emit_message" ? emitCooldownTicks : 2;
+        if (cooldown > 0 && cooldowns.IsOnCooldown(habitAction, tick, cooldown)) return;
 
         for (var i = 0; i < list.Count; i++)
         {
@@ -199,14 +202,14 @@ public sealed class ActionSelector
         }
     }
 
-    private static void ApplyCooldowns(List<Candidate> list, ActionCooldowns cooldowns, long tick)
+    private static void ApplyCooldowns(List<Candidate> list, ActionCooldowns cooldowns, long tick, int emitCooldownTicks)
     {
-        var filtered = list.Where(c => !IsOnCooldown(cooldowns, c.Action.Name, tick)).ToList();
+        var filtered = list.Where(c => !IsOnCooldown(cooldowns, c.Action.Name, tick, emitCooldownTicks)).ToList();
         list.Clear();
         list.AddRange(filtered);
     }
 
-    private static bool IsOnCooldown(ActionCooldowns cooldowns, string actionName, long tick)
+    private static bool IsOnCooldown(ActionCooldowns cooldowns, string actionName, long tick, int emitCooldownTicks)
     {
         var cd = actionName switch
         {
@@ -215,6 +218,7 @@ public sealed class ActionSelector
             "reframe_negative" => 3,
             "focus_narrow" => 2,
             "focus_widen" => 2,
+            "emit_message" => emitCooldownTicks,
             _ => 0
         };
 

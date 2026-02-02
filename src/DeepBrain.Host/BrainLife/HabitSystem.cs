@@ -74,6 +74,22 @@ public sealed class HabitSystem
         return LifeMath.Clamp01(baseInfluence * disciplineFactor);
     }
 
+    public IEnumerable<(HabitDto before, HabitDto after)> ApplyDecay(long tick)
+    {
+        if (tick % 20 != 0) yield break;
+
+        foreach (var key in _habits.Keys.ToList())
+        {
+            var h = _habits[key];
+            var factor = h.AvgReward < 0 ? 0.995 : 0.999;
+            var next = LifeMath.Clamp01(h.Strength * factor);
+            if (Math.Abs(next - h.Strength) < 0.0001) continue;
+            var after = h with { Strength = next };
+            _habits[key] = after;
+            yield return (ToDto(h), ToDto(after));
+        }
+    }
+
     private void SeedDefaults()
     {
         Add("regulate_breathe", "threat_high", "breathe_slow", 0.45);
