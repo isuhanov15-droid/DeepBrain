@@ -99,7 +99,10 @@ public partial class MainWindow : Window
     private void AddOutput(LifeOutputDto output)
     {
         while (_outputs.Count >= 50) _outputs.RemoveAt(0);
-        _outputs.Add($"[{output.Ts:HH:mm:ss}] {output.ActionName}: {output.Message}");
+        var prefix = output.ActionName == "selftalk"
+            ? "selftalk"
+            : output.ActionName;
+        _outputs.Add($"[{output.Ts:HH:mm:ss}] {prefix}: {output.Message}");
     }
 
     private static bool IsHeartbeat(string text)

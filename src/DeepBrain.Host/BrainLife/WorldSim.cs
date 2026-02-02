@@ -17,8 +17,10 @@ public sealed class WorldSim
         _rng = new Random(seed);
     }
 
-    public IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> Tick(long tick, string phase, double sleepPressure, bool isSleeping)
+    public IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> Tick(long tick, string phase, double sleepPressure, bool isSleeping, double dtSeconds)
     {
+        _events.Tick(dtSeconds);
+
         Noise = LifeMath.Clamp01(Noise + RandDelta(0.01));
         Novelty = LifeMath.Clamp01(Novelty + RandDelta(0.02));
         SocialPresence = LifeMath.Clamp01(SocialPresence + RandDelta(0.01));
@@ -68,7 +70,8 @@ public sealed class WorldSim
 
     private DeepBrain.Shared.BrainDtos.V4.WorldEventDto MakeEvent(long tick, string type, double severity, string payload)
     {
-        return new DeepBrain.Shared.BrainDtos.V4.WorldEventDto(tick, type, LifeMath.Clamp01(severity), payload);
+        var sev = LifeMath.Clamp01(severity);
+        return new DeepBrain.Shared.BrainDtos.V4.WorldEventDto(tick, type, sev, payload, 0.0, sev);
     }
 
     private void ApplyEvent(DeepBrain.Shared.BrainDtos.V4.WorldEventDto ev)

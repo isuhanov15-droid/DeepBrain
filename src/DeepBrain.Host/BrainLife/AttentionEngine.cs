@@ -60,6 +60,6 @@ public sealed class AttentionEngine
 
     private static bool HasEvent(IReadOnlyList<WorldEventDto> eventsList, string type)
     {
-        return eventsList.Any(e => e.Type == type);
+        return eventsList.Any(e => e.Type == type && e.Salience > 0.2);
     }
 }

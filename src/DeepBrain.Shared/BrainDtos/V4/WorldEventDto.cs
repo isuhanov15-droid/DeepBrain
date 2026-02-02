@@ -4,5 +4,7 @@ public sealed record WorldEventDto(
     long Tick,
     string Type,
     double Severity,
-    string Payload
+    string Payload,
+    double AgeSeconds,
+    double Salience
 );

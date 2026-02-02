@@ -15,9 +15,9 @@ public sealed class CircadianClock
     {
         TimeOfDay = (TimeOfDay + dtSeconds / DayLengthSeconds) % 1.0;
         if (isSleeping)
-            SleepPressure = LifeMath.Clamp01(SleepPressure - SleepPressureDecay);
+            SleepPressure = LifeMath.Clamp01(SleepPressure - SleepPressureDecay * dtSeconds);
         else
-            SleepPressure = LifeMath.Clamp01(SleepPressure + SleepPressureGain);
+            SleepPressure = LifeMath.Clamp01(SleepPressure + SleepPressureGain * dtSeconds);
     }
 
     public CircadianDto Snapshot(bool isSleeping)

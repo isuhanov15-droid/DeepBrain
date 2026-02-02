@@ -1,3 +1,4 @@
+using System.Linq;
 using DeepBrain.Shared.Brain;
 
 namespace DeepBrain.Host.BrainLife;
@@ -13,6 +14,8 @@ public sealed class ActionSelector
         LearningEngine learning,
         LoopDetector loop,
         EpisodeMemory memory,
+        ActionCooldowns cooldowns,
+        long tick,
         string dominantDrive,
         string? planStrategy,
         string attentionFocus,
@@ -54,6 +57,10 @@ public sealed class ActionSelector
         ApplyMemoryBias(list, memory, homeo, affect);
         ApplyAttentionBias(list, attentionFocus);
         ApplySemanticBias(list, semantic, semanticKey);
+        ApplyCooldowns(list, cooldowns, tick);
+
+        if (list.Count == 0)
+            list.Add(Make("internal", "rest_short", 0.1 + (1 - homeo.Energy), "cooldown_fallback", learning));
 
         var best = list
             .OrderByDescending(c => c.Score)
@@ -165,5 +172,27 @@ public sealed class ActionSelector
             if (bonus != 0 || penalty != 0)
                 list[i] = c with { Score = c.Score + bonus - penalty };
         }
+    }
+
+    private static void ApplyCooldowns(List<Candidate> list, ActionCooldowns cooldowns, long tick)
+    {
+        var filtered = list.Where(c => !IsOnCooldown(cooldowns, c.Action.Name, tick)).ToList();
+        list.Clear();
+        list.AddRange(filtered);
+    }
+
+    private static bool IsOnCooldown(ActionCooldowns cooldowns, string actionName, long tick)
+    {
+        var cd = actionName switch
+        {
+            "breathe_slow" => 3,
+            "rest_short" => 5,
+            "reframe_negative" => 3,
+            "focus_narrow" => 2,
+            "focus_widen" => 2,
+            _ => 0
+        };
+
+        return cd > 0 && cooldowns.IsOnCooldown(actionName, tick, cd);
     }
 }

@@ -27,8 +27,11 @@ public sealed class LifeLoop
     private readonly GoalResolver _goals = new();
     private readonly PlanEngine _plan = new();
     private readonly AttentionEngine _attention = new();
+    private readonly AttentionInertiaEngine _attentionInertia = new();
     private readonly SemanticMemory _semantic = new();
     private readonly SelfTalkEngine _selfTalk = new();
+    private readonly SelfTalkThrottle _selfTalkThrottle = new();
+    private readonly ActionCooldowns _cooldowns = new();
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
 
@@ -154,7 +157,7 @@ public sealed class LifeLoop
         }
 
         var circ = _clock.Snapshot(false);
-        var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping);
+        var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping, dtSeconds);
         foreach (var ev in newEvents)
             _log($"EVENT: {ev.Type} {ev.Severity:0.00} {ev.Payload}");
 
@@ -178,7 +181,8 @@ public sealed class LifeLoop
             _log("PLAN INTERRUPTED");
 
         var recentEvents = _world.Events.GetRecent(5);
-        var attention = _attention.Compute(_homeo, instincts, _affect, circ, recentEvents);
+        var computedAttention = _attention.Compute(_homeo, instincts, _affect, circ, recentEvents);
+        var attention = _attentionInertia.Apply(computedAttention);
         var semanticKey = $"{_affect.Mood}+drive={dominantDrive}+phase={circ.Phase}+focus={attention.Focus1}";
 
         var (action, reason, strategy) = _selector.Choose(
@@ -188,6 +192,8 @@ public sealed class LifeLoop
             _learning,
             _loop,
             _memory,
+            _cooldowns,
+            _tick,
             dominantDrive,
             activePlan?.Strategy,
             attention.Focus1,
@@ -207,8 +213,10 @@ public sealed class LifeLoop
             _world.DampenNovelty(action.Strength);
 
         var reward = _reward.Compute(beforeHomeo, _homeo);
+        reward += ComputeRegulationBonus(action, beforeHomeo, _homeo, beforeAffect, _affect);
         _learning.Update(action.Name, reward);
         _loop.Update(action.Name, reward);
+        _cooldowns.Mark(action.Name, _tick);
 
         outcome = new OutcomeDto(outcome.Action, reward, outcome.Message);
 
@@ -293,7 +301,9 @@ public sealed class LifeLoop
         {
             var goalsLine = string.Join(",", goals.Select(g => $"{g.Id}:{g.Urgency:0.00}"));
             var planLine = activePlan is null ? "none" : $"{activePlan.Strategy}/{activePlan.GoalId}/{activePlan.RemainingTicks}";
-            var line = $"tick={_tick} | phase={circ.Phase} | sleeping={circ.IsSleeping} | focus={attention.Focus1} | eventTop={(recentEvents.LastOrDefault()?.Type ?? "none")} | plan={planLine} | action={action.Name}({action.Kind}) | reward={reward:0.000} | loopPenalty={_loop.LoopPenalty:0.00} | selftalk={(string.IsNullOrWhiteSpace(_lastSelfTalk) ? "no" : "yes")}";
+            var topEvent = recentEvents.FirstOrDefault();
+            var topEventText = topEvent is null ? "none" : $"{topEvent.Type}/{topEvent.Salience:0.00}";
+            var line = $"tick={_tick} | phase={circ.Phase} | sleeping={circ.IsSleeping} | focus={attention.Focus1}({attention.Intensity:0.00}) | topEvent={topEventText} | plan={planLine} | action={action.Name}({action.Kind}) | reward={reward:0.000} | loopPenalty={_loop.LoopPenalty:0.00} | selftalk={(string.IsNullOrWhiteSpace(_lastSelfTalk) ? "no" : "yes")}";
             _log(line);
             if (!string.IsNullOrWhiteSpace(_outputSinceDiag))
             {
@@ -315,11 +325,11 @@ public sealed class LifeLoop
             reward
         ));
         _lastSelfTalk = selfTalk;
-        if (!string.IsNullOrWhiteSpace(selfTalk))
+        if (!string.IsNullOrWhiteSpace(selfTalk) && _selfTalkThrottle.ShouldSpeak(_tick, selfTalk))
         {
-            _log($"selftalk: {selfTalk}");
+            _log($"SELF TALK: {selfTalk}");
             EmitTrace("selftalk", new { text = selfTalk }, ct);
-            _output(new LifeOutputDto(_tick, DateTimeOffset.Now, $"selftalk: {selfTalk}", "selftalk"), ct);
+            _output(new LifeOutputDto(_tick, DateTimeOffset.Now, selfTalk, "selftalk"), ct);
         }
 
         _tick++;
@@ -328,6 +338,18 @@ public sealed class LifeLoop
     private void EmitTrace(string stage, object data, CancellationToken ct)
     {
         _trace(new TraceDto(_tick, stage, data), ct);
+    }
+
+    private static double ComputeRegulationBonus(ActionDto action, HomeostasisDto before, HomeostasisDto after, AffectDto beforeAffect, AffectDto afterAffect)
+    {
+        var bonus = 0.0;
+        if (action.Name == "breathe_slow" && after.Arousal < before.Arousal)
+            bonus += 0.03;
+        if (action.Name == "rest_short" && after.Energy > before.Energy)
+            bonus += 0.03;
+        if (action.Name == "reframe_negative" && afterAffect.Valence > beforeAffect.Valence)
+            bonus += 0.02;
+        return bonus;
     }
 
     private void AppendEpisode(EpisodeDto episode)
