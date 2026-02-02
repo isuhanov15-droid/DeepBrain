@@ -11,6 +11,8 @@ public sealed class TcpBrainServer : IAsyncDisposable
 {
     private readonly TcpListener _listener;
     private readonly ConcurrentDictionary<ClientSession, byte> _sessions = new();
+    private readonly object _lifeOutputLock = new();
+    private readonly List<LifeOutputDto> _lifeOutputs = new(64);
 
     private readonly Func<Task> _onBrainStart;
     private readonly Func<Task> _onBrainStop;
@@ -60,7 +62,7 @@ public sealed class TcpBrainServer : IAsyncDisposable
             catch when (ct.IsCancellationRequested) { break; }
 
             var session = new ClientSession(
-                client, _onBrainStart, _onBrainStop, _onBrainStep, _onLifeStart, _onLifeStop, _onLifeStep, _onInputSet, _onEventPush);
+                client, _onBrainStart, _onBrainStop, _onBrainStep, _onLifeStart, _onLifeStop, _onLifeStep, _onInputSet, _onEventPush, GetLifeOutputsSnapshot);
 
             _sessions.TryAdd(session, 0);
 
@@ -92,6 +94,29 @@ public sealed class TcpBrainServer : IAsyncDisposable
     {
         foreach (var s in _sessions.Keys)
             try { await s.SendLifeStateAsync(state, ct); } catch { }
+    }
+
+    public async Task BroadcastLifeOutputAsync(LifeOutputDto output, CancellationToken ct)
+    {
+        RecordLifeOutput(output);
+        foreach (var s in _sessions.Keys)
+            try { await s.SendLifeOutputAsync(output, ct); } catch { }
+    }
+
+    private void RecordLifeOutput(LifeOutputDto output)
+    {
+        lock (_lifeOutputLock)
+        {
+            if (_lifeOutputs.Count >= 50)
+                _lifeOutputs.RemoveAt(0);
+            _lifeOutputs.Add(output);
+        }
+    }
+
+    private IReadOnlyList<LifeOutputDto> GetLifeOutputsSnapshot()
+    {
+        lock (_lifeOutputLock)
+            return _lifeOutputs.ToList();
     }
 
     public async Task BroadcastTraceAsync(TraceDto trace, CancellationToken ct)

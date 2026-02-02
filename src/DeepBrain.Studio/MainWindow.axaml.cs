@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private readonly TcpClientService _tcp = new();
     private readonly ObservableCollection<string> _logs = new();
     private readonly ObservableCollection<string> _traces = new();
+    private readonly ObservableCollection<string> _outputs = new();
     private bool _heartbeatOn;
 
     public MainWindow()
@@ -21,6 +22,7 @@ public partial class MainWindow : Window
 
         LogsList.ItemsSource = _logs;
         TraceList.ItemsSource = _traces;
+        OutputsList.ItemsSource = _outputs;
 
         _tcp.OnLog += s => Ui(() => HandleLog(s));
         _tcp.OnInfo += s => Ui(() =>
@@ -46,6 +48,7 @@ public partial class MainWindow : Window
             await _tcp.SubscribeStateAsync();
             await _tcp.SubscribeTraceAsync();
             await _tcp.SubscribeLifeStateAsync();
+            await _tcp.SubscribeLifeOutputAsync();
         });
 
         DisconnectBtn.Click += async (_, _) => await RunSafeAsync(async () => await _tcp.DisconnectAsync());
@@ -53,6 +56,7 @@ public partial class MainWindow : Window
         {
             _logs.Clear();
             _traces.Clear();
+            _outputs.Clear();
         };
         BrainStartBtn.IsEnabled = false;
         BrainStopBtn.IsEnabled = false;
@@ -65,6 +69,7 @@ public partial class MainWindow : Window
 
         _tcp.OnTrace += s => Ui(() => AddTrace(s));
         _tcp.OnLifeState += state => Ui(() => UpdateLife(state));
+        _tcp.OnLifeOutput += output => Ui(() => AddOutput(output));
     }
 
     private void HandleLog(string text)
@@ -88,6 +93,12 @@ public partial class MainWindow : Window
     {
         while (_traces.Count >= 50) _traces.RemoveAt(0);
         _traces.Add(text);
+    }
+
+    private void AddOutput(LifeOutputDto output)
+    {
+        while (_outputs.Count >= 50) _outputs.RemoveAt(0);
+        _outputs.Add($"[{output.Ts:HH:mm:ss}] {output.ActionName}: {output.Message}");
     }
 
     private static bool IsHeartbeat(string text)

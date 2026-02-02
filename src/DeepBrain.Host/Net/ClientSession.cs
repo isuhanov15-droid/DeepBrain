@@ -20,11 +20,13 @@ public sealed class ClientSession : IAsyncDisposable
     private readonly Func<Task> _onLifeStep;
     private readonly Func<BrainInputDto, Task> _onInputSet;
     private readonly Func<string, Task> _onEventPush;
+    private readonly Func<IReadOnlyList<LifeOutputDto>> _getLifeOutputs;
 
     private bool _wantsLogs;
     private bool _wantsState;
     private bool _wantsTrace;
     private bool _wantsLifeState;
+    private bool _wantsLifeOutput;
 
     public EndPoint Remote => _client.Client.RemoteEndPoint!;
 
@@ -37,7 +39,8 @@ public sealed class ClientSession : IAsyncDisposable
         Func<Task> onLifeStop,
         Func<Task> onLifeStep,
         Func<BrainInputDto, Task> onInputSet,
-        Func<string, Task> onEventPush)
+        Func<string, Task> onEventPush,
+        Func<IReadOnlyList<LifeOutputDto>> getLifeOutputs)
     {
         _client = client;
         _stream = client.GetStream();
@@ -50,6 +53,7 @@ public sealed class ClientSession : IAsyncDisposable
         _onLifeStep = onLifeStep;
         _onInputSet = onInputSet;
         _onEventPush = onEventPush;
+        _getLifeOutputs = getLifeOutputs;
     }
 
     public async Task RunAsync(Func<string, Task> onInfo, CancellationToken ct)
@@ -104,6 +108,15 @@ public sealed class ClientSession : IAsyncDisposable
             case Msg.BrainLifeStateSubscribe:
                 _wantsLifeState = true;
                 await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] life state subscribed ✅", ct);
+                break;
+
+            case Msg.BrainLifeOutputSubscribe:
+                _wantsLifeOutput = true;
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] life output subscribed ✅", ct);
+                foreach (var output in _getLifeOutputs())
+                {
+                    await SendLifeOutputAsync(output, ct);
+                }
                 break;
 
             case Msg.BrainStart:
@@ -177,6 +190,13 @@ public sealed class ClientSession : IAsyncDisposable
         if (!_wantsLifeState) return;
         var payload = PayloadWriter.Write(state);
         await SendAsync(new Envelope(Msg.BrainLifeState, payload), ct);
+    }
+
+    public async Task SendLifeOutputAsync(LifeOutputDto output, CancellationToken ct)
+    {
+        if (!_wantsLifeOutput) return;
+        var payload = PayloadWriter.Write(output);
+        await SendAsync(new Envelope(Msg.BrainLifeOutputAppend, payload), ct);
     }
 
     public async Task SendTraceAsync(TraceDto trace, CancellationToken ct)

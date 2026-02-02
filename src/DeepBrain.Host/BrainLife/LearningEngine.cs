@@ -17,4 +17,11 @@ public sealed class LearningEngine
     {
         return _emaReward.TryGetValue(actionName, out var v) ? v : 0.0;
     }
+
+    public (string action, double ema) GetBest()
+    {
+        if (_emaReward.Count == 0) return ("none", 0.0);
+        var best = _emaReward.OrderByDescending(kv => kv.Value).First();
+        return (best.Key, best.Value);
+    }
 }

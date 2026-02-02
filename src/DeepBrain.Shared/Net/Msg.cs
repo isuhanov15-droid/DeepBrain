@@ -16,6 +16,8 @@ public static class Msg
     public const string BrainLifeStateSubscribe = "brain.life.state.subscribe";
     public const string BrainLifeState = "brain.life.state";
     public const string BrainLifeEpisodeAppend = "brain.life.episode.append";
+    public const string BrainLifeOutputSubscribe = "brain.life.output.subscribe";
+    public const string BrainLifeOutputAppend = "brain.life.output.append";
     public const string BrainLifeStart = "brain.life.start";
     public const string BrainLifeStop = "brain.life.stop";
     public const string BrainLifeStep = "brain.life.step";

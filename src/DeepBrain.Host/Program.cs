@@ -68,6 +68,7 @@ lifeLoop = new LifeLoop(
             RenderScreen(ui, consoleLock);
         }
     },
+    (output, ct) => server.BroadcastLifeOutputAsync(output, ct).GetAwaiter().GetResult(),
     msg => LogLine(consoleLock, logBuffer, logWriter, msg)
 );
 

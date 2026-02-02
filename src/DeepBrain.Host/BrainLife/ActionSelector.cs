@@ -23,13 +23,13 @@ public sealed class ActionSelector
         if (instincts.EnergyConservation > 0.6)
             list.Add(Make("internal", "rest_short", instincts.EnergyConservation, "energy_conservation", learning));
 
-        if (instincts.Exploration > 0.6)
+        if (instincts.Exploration >= 0.6)
         {
             list.Add(Make("external", "explore_signal", instincts.Exploration, "exploration", learning));
             list.Add(Make("internal", "focus_widen", instincts.Exploration * 0.8, "exploration", learning));
         }
 
-        if (instincts.Attachment > 0.6)
+        if (instincts.Attachment >= 0.6)
             list.Add(Make("external", "emit_message", instincts.Attachment, "attachment", learning));
 
         if (affect.Mood == "frustrated" || instincts.Agency > 0.6)
@@ -52,7 +52,8 @@ public sealed class ActionSelector
     private static Candidate Make(string kind, string name, double baseScore, string reason, LearningEngine learning)
     {
         var bias = learning.GetEma(name);
-        var score = baseScore + bias * 0.2;
+        var externalBonus = kind == "external" ? 0.2 : 0.0;
+        var score = baseScore + bias * 0.2 + externalBonus;
         var action = new ActionDto(kind, name, LifeMath.Clamp01(baseScore), null);
         return new Candidate(action, score, reason);
     }

@@ -23,6 +23,7 @@ public sealed class TcpClientService : IAsyncDisposable
     public event Action<string>? OnInfo;
     public event Action<long, long, string, string>? OnState;
     public event Action<LifeStateDto>? OnLifeState;
+    public event Action<LifeOutputDto>? OnLifeOutput;
     public event Action<string>? OnTrace;
 
 
@@ -133,6 +134,10 @@ public sealed class TcpClientService : IAsyncDisposable
                 OnLifeState?.Invoke(PayloadReader.Read<LifeStateDto>(env.Payload));
                 break;
 
+            case Msg.BrainLifeOutputAppend:
+                OnLifeOutput?.Invoke(PayloadReader.Read<LifeOutputDto>(env.Payload));
+                break;
+
             case Msg.TraceAppend:
                 OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
                 break;
@@ -191,6 +196,14 @@ public sealed class TcpClientService : IAsyncDisposable
         if (_stream is null) return;
 
         var env = new Envelope(Msg.BrainLifeStateSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
+        await SendAsync(env, _cts?.Token ?? CancellationToken.None);
+    }
+
+    public async Task SubscribeLifeOutputAsync()
+    {
+        if (_stream is null) return;
+
+        var env = new Envelope(Msg.BrainLifeOutputSubscribe, Guid.NewGuid().ToString("N"), NowMs(), new { });
         await SendAsync(env, _cts?.Token ?? CancellationToken.None);
     }
 

@@ -15,6 +15,7 @@ public sealed class LifeLoop
     private readonly LearningEngine _learning;
     private readonly Action<LifeStateDto, CancellationToken> _broadcast;
     private readonly Action<TraceDto, CancellationToken> _trace;
+    private readonly Action<LifeOutputDto, CancellationToken> _output;
     private readonly Action<string> _log;
 
     private HomeostasisDto _homeo = new(0.7, 0.2, 0.3, 0.1, 0.7);
@@ -23,6 +24,7 @@ public sealed class LifeLoop
     private bool _running = true;
     private bool _stepRequested;
     private double _agencyOffset;
+    private string? _outputSinceDiag;
 
     private readonly List<EpisodeDto> _episodes = new(512);
     private const int EpisodeCapacity = 512;
@@ -39,6 +41,7 @@ public sealed class LifeLoop
         LearningEngine learning,
         Action<LifeStateDto, CancellationToken> broadcast,
         Action<TraceDto, CancellationToken> trace,
+        Action<LifeOutputDto, CancellationToken> output,
         Action<string> log)
     {
         _world = world;
@@ -51,6 +54,7 @@ public sealed class LifeLoop
         _learning = learning;
         _broadcast = broadcast;
         _trace = trace;
+        _output = output;
         _log = log;
     }
 
@@ -82,6 +86,7 @@ public sealed class LifeLoop
     private void TickOnce(double dtSeconds, CancellationToken ct)
     {
         var beforeHomeo = _homeo;
+        var beforeAffect = _affect;
         _world.Tick(_tick);
 
         _homeo = _homeostasis.Update(_homeo, _world, dtSeconds);
@@ -94,6 +99,8 @@ public sealed class LifeLoop
         _affect = _emotion.Compute(instincts, _homeo);
 
         var (action, reason) = _selector.Choose(_homeo, instincts, _affect, _learning);
+        EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason }, ct);
+
         var outcome = _actuator.Apply(action, ref _homeo, ref _affect);
 
         if (action.Name == "focus_narrow")
@@ -107,11 +114,37 @@ public sealed class LifeLoop
         var reward = _reward.Compute(beforeHomeo, _homeo);
         _learning.Update(action.Name, reward);
 
+        outcome = new OutcomeDto(outcome.Action, reward, outcome.Message);
+
         EmitTrace("homeostasis", _homeo, ct);
         EmitTrace("instincts", instincts, ct);
         EmitTrace("affect", _affect, ct);
-        EmitTrace("action", new { action, reason }, ct);
+        EmitTrace("action", new
+        {
+            actionName = action.Name,
+            kind = action.Kind,
+            deltaSummary = new
+            {
+                Energy = _homeo.Energy - beforeHomeo.Energy,
+                Fatigue = _homeo.Fatigue - beforeHomeo.Fatigue,
+                Safety = _homeo.Safety - beforeHomeo.Safety,
+                Arousal = _homeo.Arousal - beforeHomeo.Arousal,
+                Valence = _affect.Valence - beforeAffect.Valence
+            }
+        }, ct);
         EmitTrace("reward", new { reward }, ct);
+
+        if (action.Kind == "external" && string.IsNullOrWhiteSpace(outcome.Message))
+            outcome = new OutcomeDto(outcome.Action, outcome.Reward, $"action={action.Name}");
+
+        if (!string.IsNullOrWhiteSpace(outcome.Message))
+        {
+            var msg = outcome.Message!.Trim();
+            _log($"[life] OUTPUT: {msg}");
+            EmitTrace("output", new { message = msg, actionName = action.Name }, ct);
+            _outputSinceDiag = msg;
+            _output(new LifeOutputDto(_tick, DateTimeOffset.Now, msg, action.Name), ct);
+        }
 
         var state = new LifeStateDto(
             _tick,
@@ -138,8 +171,15 @@ public sealed class LifeLoop
 
         if (_tick < DiagnosticTicks && _tick % 20 == 0)
         {
-            var line = $"tick={_tick} mood={_affect.Mood} energy={_homeo.Energy:0.00} fatigue={_homeo.Fatigue:0.00} safety={_homeo.Safety:0.00} lastAction={action.Name} emaReward={_learning.GetEma(action.Name):0.000}";
+            var (bestAction, bestEma) = _learning.GetBest();
+            var reasonShort = reason.Length > 48 ? reason[..48] + "..." : reason;
+            var line = $"tick={_tick} | mood={_affect.Mood} | energy={_homeo.Energy:0.00} | fatigue={_homeo.Fatigue:0.00} | safety={_homeo.Safety:0.00} | action={action.Name}({action.Kind}) | reward={reward:0.000} | emaBest={bestAction}:{bestEma:0.000} | reason={reasonShort}";
             _log(line);
+            if (!string.IsNullOrWhiteSpace(_outputSinceDiag))
+            {
+                _log($"OUTPUT: {_outputSinceDiag}");
+                _outputSinceDiag = null;
+            }
         }
 
         _tick++;
