@@ -1,8 +1,8 @@
-# Описание кода всех *.cs файлов (полное)
+﻿# Описание кода всех *.cs файлов (полное)
 
 Дата: 2026-02-02
 
-Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.4: суточный цикл, сон, консолидация памяти и микро‑планы.
+Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.5: суточный цикл, сон, консолидация памяти, микро‑планы, внимание, события мира, семантическая память, self-talk.
 
 ---
 
@@ -16,7 +16,7 @@
 - `BrainStateSubscribe`, `BrainState` — подписка и доставка состояния v0.1.
 - `BrainStart`, `BrainStop`, `BrainStep` — управляющие команды v0.1.
 - `TraceSubscribe`, `TraceAppend` — подписка и доставка трассировки.
-- `BrainLifeStateSubscribe`, `BrainLifeState`, `BrainLifeEpisodeAppend` — подписка/доставка жизненного состояния v0.2/v0.3/v0.4.
+- `BrainLifeStateSubscribe`, `BrainLifeState`, `BrainLifeEpisodeAppend` — подписка/доставка жизненного состояния v0.2/v0.3/v0.4/v0.5.
 - `BrainLifeOutputSubscribe`, `BrainLifeOutputAppend` — подписка/доставка внешнего вывода.
 - `BrainLifeStart`, `BrainLifeStop`, `BrainLifeStep` — управляющие команды v0.2+.
 - `InputSet`, `InputGet`, `InputSnapshot` — установка/запрос входов.
@@ -89,7 +89,7 @@ ReadEnvelopeAsync/WriteEnvelopeAsync:
 Назначение: DTO события для `event.push`.
 Поле: `Name`.
 
-### DTO жизненного цикла v0.2/v0.3/v0.4
+### DTO жизненного цикла v0.2/v0.3/v0.4/v0.5
 ActionDto (`src/DeepBrain.Shared/Brain/ActionDto.cs`):
 - `Kind` (internal|external), `Name`, `Strength`, `Note`.
 
@@ -128,6 +128,15 @@ GoalDto (`src/DeepBrain.Shared/BrainDtos/V3/GoalDto.cs`):
 PlanDto (`src/DeepBrain.Shared/BrainDtos/V3/PlanDto.cs`):
 - `Strategy`, `RemainingTicks`, `GoalId`, `Rationale`.
 
+AttentionDto (`src/DeepBrain.Shared/BrainDtos/V4/AttentionDto.cs`):
+- `Focus1`, `Focus2`, `Intensity`, `Reason`.
+
+WorldEventDto (`src/DeepBrain.Shared/BrainDtos/V4/WorldEventDto.cs`):
+- `Tick`, `Type`, `Severity`, `Payload`.
+
+SemanticNoteDto (`src/DeepBrain.Shared/BrainDtos/V4/SemanticNoteDto.cs`):
+- `Key`, `BestAction`, `Score`, `Samples`.
+
 ---
 
 ## 2) DeepBrain.Host (сервер и мозг)
@@ -140,11 +149,11 @@ PlanDto (`src/DeepBrain.Shared/BrainDtos/V3/PlanDto.cs`):
 - инициализация:
   - `InputStore`, `BrainEngine` (v0.1);
   - `FileBatchWriter` для логов и трасс (`Logs/` и `Trace/`);
-  - `LifeLoop` (v0.2/v0.3/v0.4), включен по умолчанию (`useLifeLoop = true`).
+  - `LifeLoop` (v0.2/v0.3/v0.4/v0.5), включен по умолчанию (`useLifeLoop = true`).
 - запуск TCP‑сервера `TcpBrainServer`.
 - heartbeat‑цикл (обновляет `Console.Title`, отправляет log heartbeat).
 - запуск одного из циклов:
-  - `LifeLoop.RunAsync` (v0.2/v0.3/v0.4),
+  - `LifeLoop.RunAsync` (v0.2/v0.3/v0.4/v0.5),
   - либо `RunBrainLoopAsync` (v0.1).
 - командный цикл:
   - `trace` — вкл/выкл отображение trace в консоли;
@@ -271,7 +280,7 @@ HandleAsync:
 
 ---
 
-## 4) Brain v0.4 (жизненный цикл с временем/сном/планами)
+## 4) Brain v0.4/v0.5 (жизненный цикл с временем/сном/планами/вниманием)
 
 ### src/DeepBrain.Host/BrainLife/LifeMath.cs
 Назначение: утилита `Clamp01`.
@@ -342,7 +351,29 @@ HandleAsync:
 - стратегия берется из плана, иначе вычисляется по драйву;
 - анти‑петля штрафует повтор `LastAction`;
 - эпизодическая память добавляет бонус/штраф по действиям.
+- v0.5: добавляет Attention- и Semantic-бонусы, учитывает focus.
 
+### src/DeepBrain.Host/BrainLife/WorldEventsQueue.cs
+Назначение: ring-buffer событий мира (50), `GetRecent(k)`.
+
+### src/DeepBrain.Host/BrainLife/WorldSim.cs
+Назначение: фоновая симуляция мира.
+v0.5:
+- генерирует события (threat_spike, novelty_opportunity, social_ping, fatigue_wave, calm_window);
+- пушит в `WorldEventsQueue` и влияет на Threat/Novelty/SocialPresence.
+
+### src/DeepBrain.Host/BrainLife/AttentionEngine.cs
+Назначение: выбор фокуса внимания (threat/novelty/social/body/agency).
+Входы: homeostasis/instincts/affect/circadian/recentEvents.
+Выход: `AttentionDto`.
+
+### src/DeepBrain.Host/BrainLife/SemanticMemory.cs
+Назначение: агрегированные "смыслы" (key -> best action).
+Методы: `Update`, `SuggestBonus`, `GetTopNotes`, `Consolidate` (во сне).
+
+### src/DeepBrain.Host/BrainLife/SelfTalkEngine.cs
+Назначение: внутренний монолог.
+Триггеры: сон/пробуждение, loopPenalty, тревога, calm_window, высокий reward.
 ### src/DeepBrain.Host/BrainLife/Actuator.cs
 Назначение: применение действия к homeostasis/affect.
 Эффекты:
@@ -354,7 +385,7 @@ HandleAsync:
 Формула: энергия+безопасность − (fatigue+pain)*0.5.
 
 ### src/DeepBrain.Host/BrainLife/LifeLoop.cs
-Назначение: главный цикл v0.4.
+Назначение: главный цикл v0.4/v0.5.
 Шаги:
 1) `CircadianClock.Tick`.
 2) `SleepEngine.Update`.
@@ -426,3 +457,6 @@ Connect: ping + подписки logs/state/trace/life/output.
 - Проект содержит два параллельных мозга: v0.1 (старый) и v0.4 (LifeLoop с временем/сном/планами).
 - Ветка v0.4 по умолчанию активна и вещает расширенную телеметрию.
 - Studio — только наблюдение и вывод состояния, без управления мозгом.
+
+
+

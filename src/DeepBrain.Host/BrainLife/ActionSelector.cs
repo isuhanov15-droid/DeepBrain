@@ -14,7 +14,10 @@ public sealed class ActionSelector
         LoopDetector loop,
         EpisodeMemory memory,
         string dominantDrive,
-        string? planStrategy)
+        string? planStrategy,
+        string attentionFocus,
+        SemanticMemory semantic,
+        string semanticKey)
     {
         var list = new List<Candidate>();
 
@@ -49,6 +52,8 @@ public sealed class ActionSelector
 
         ApplyLoopPenalty(list, loop);
         ApplyMemoryBias(list, memory, homeo, affect);
+        ApplyAttentionBias(list, attentionFocus);
+        ApplySemanticBias(list, semantic, semanticKey);
 
         var best = list
             .OrderByDescending(c => c.Score)
@@ -126,6 +131,39 @@ public sealed class ActionSelector
                 var penalty = avg < 0 ? 0.2 : 0;
                 list[i] = c with { Score = c.Score + bonus - penalty };
             }
+        }
+    }
+
+    private static void ApplyAttentionBias(List<Candidate> list, string focus)
+    {
+        for (var i = 0; i < list.Count; i++)
+        {
+            var c = list[i];
+            var bonus = 0.0;
+            if (focus == "threat" && (c.Action.Name == "breathe_slow" || c.Action.Name == "focus_narrow"))
+                bonus = 0.3;
+            else if (focus == "novelty" && c.Action.Name == "explore_signal")
+                bonus = 0.25;
+            else if (focus == "social" && c.Action.Name == "emit_message")
+                bonus = 0.25;
+            else if (focus == "body" && c.Action.Name == "rest_short")
+                bonus = 0.2;
+            else if (focus == "agency" && c.Action.Name == "reframe_negative")
+                bonus = 0.2;
+
+            if (bonus > 0)
+                list[i] = c with { Score = c.Score + bonus };
+        }
+    }
+
+    private static void ApplySemanticBias(List<Candidate> list, SemanticMemory semantic, string semanticKey)
+    {
+        for (var i = 0; i < list.Count; i++)
+        {
+            var c = list[i];
+            var (bonus, penalty) = semantic.SuggestBonus(semanticKey, c.Action.Name);
+            if (bonus != 0 || penalty != 0)
+                list[i] = c with { Score = c.Score + bonus - penalty };
         }
     }
 }

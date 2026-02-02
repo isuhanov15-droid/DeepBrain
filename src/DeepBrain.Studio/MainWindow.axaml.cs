@@ -156,6 +156,41 @@ public partial class MainWindow : Window
         {
             LifeGoalsText.Text = "goals=n/a";
         }
+
+        if (state.Attention is not null)
+        {
+            var focus2 = string.IsNullOrWhiteSpace(state.Attention.Focus2) ? "" : $"/{state.Attention.Focus2}";
+            LifeAttentionText.Text = $"attention={state.Attention.Focus1}{focus2} intensity={state.Attention.Intensity:0.00} reason={state.Attention.Reason}";
+        }
+        else
+        {
+            LifeAttentionText.Text = "attention=n/a";
+        }
+
+        if (state.RecentEvents is not null && state.RecentEvents.Count > 0)
+        {
+            var eventsLine = state.RecentEvents
+                .TakeLast(5)
+                .Select(e => $"{e.Type}:{e.Severity:0.00} {e.Payload}")
+                .ToArray();
+            LifeEventsText.Text = $"events={string.Join(" | ", eventsLine)}";
+        }
+        else
+        {
+            LifeEventsText.Text = "events=n/a";
+        }
+
+        if (state.SemanticNotesTop is not null && state.SemanticNotesTop.Count > 0)
+        {
+            var notesLine = state.SemanticNotesTop
+                .Select(n => $"{n.Key}->{n.BestAction} {n.Score:0.00} ({n.Samples})")
+                .ToArray();
+            LifeSemanticText.Text = $"semantic={string.Join(" | ", notesLine)}";
+        }
+        else
+        {
+            LifeSemanticText.Text = "semantic=n/a";
+        }
     }
 
     private async Task RunSafeAsync(Func<Task> action)
