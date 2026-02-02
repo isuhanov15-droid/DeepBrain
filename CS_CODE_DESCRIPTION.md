@@ -2,7 +2,7 @@
 
 Дата: 2026-02-02
 
-Ниже приведено детальное описание всех классов и модулей в проекте DeepBrain (Host / Shared / Studio), включая жизненный цикл v0.2 и старый мозг v0.1.
+Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.3: инерция аффекта, память, анти‑петля и стратегия.
 
 ---
 
@@ -16,9 +16,9 @@
 - `BrainStateSubscribe`, `BrainState` — подписка и доставка состояния v0.1.
 - `BrainStart`, `BrainStop`, `BrainStep` — управляющие команды v0.1.
 - `TraceSubscribe`, `TraceAppend` — подписка и доставка трассировки.
-- `BrainLifeStateSubscribe`, `BrainLifeState`, `BrainLifeEpisodeAppend` — подписка/доставка жизненного состояния v0.2 (эпизоды зарезервированы).
-- `BrainLifeOutputSubscribe`, `BrainLifeOutputAppend` — подписка/доставка внешнего вывода v0.2.
-- `BrainLifeStart`, `BrainLifeStop`, `BrainLifeStep` — управляющие команды v0.2.
+- `BrainLifeStateSubscribe`, `BrainLifeState`, `BrainLifeEpisodeAppend` — подписка/доставка жизненного состояния v0.2/v0.3.
+- `BrainLifeOutputSubscribe`, `BrainLifeOutputAppend` — подписка/доставка внешнего вывода.
+- `BrainLifeStart`, `BrainLifeStop`, `BrainLifeStep` — управляющие команды v0.2/v0.3.
 - `InputSet`, `InputGet`, `InputSnapshot` — установка/запрос входов.
 - `EventPush` — внешнее событие (строка).
 
@@ -89,7 +89,7 @@ ReadEnvelopeAsync/WriteEnvelopeAsync:
 Назначение: DTO события для `event.push`.
 Поле: `Name`.
 
-### DTO жизненного цикла v0.2
+### DTO жизненного цикла v0.2/v0.3
 ActionDto (`src/DeepBrain.Shared/Brain/ActionDto.cs`):
 - `Kind` (internal|external), `Name`, `Strength`, `Note`.
 
@@ -106,13 +106,17 @@ OutcomeDto (`OutcomeDto.cs`):
 - `Action`, `Reward`, `Message`.
 
 LifeStateDto (`LifeStateDto.cs`):
-- `Tick`, `Ts`, `Homeostasis`, `Instincts`, `Affect`, `LastDecision`, `LastReward`.
+- `Tick`, `Ts`, `Homeostasis`, `Instincts`, `Affect`, `LastDecision`, `LastReward`,
+- расширения v0.3: `Policy`, `DominantDrive`, `MoodInertia`.
 
 EpisodeDto (`EpisodeDto.cs`):
 - `Tick`, `BeforeHomeostasis`, `AfterHomeostasis`, `Action`, `Reward`, `Ts`.
 
 LifeOutputDto (`LifeOutputDto.cs`):
 - `Tick`, `Ts`, `Message`, `ActionName`.
+
+PolicyContextDto (`src/DeepBrain.Shared/BrainDtos/V2/PolicyContextDto.cs`):
+- `Strategy`, `Reason`, `LoopCount`, `LoopPenalty`, `LastAction`, `SameActionStreak`, `AvgRewardShort`.
 
 ---
 
@@ -126,11 +130,11 @@ LifeOutputDto (`LifeOutputDto.cs`):
 - инициализация:
   - `InputStore`, `BrainEngine` (v0.1);
   - `FileBatchWriter` для логов и трасс (`Logs/` и `Trace/`);
-  - `LifeLoop` (v0.2), включен по умолчанию (`useLifeLoop = true`).
+  - `LifeLoop` (v0.2/v0.3), включен по умолчанию (`useLifeLoop = true`).
 - запуск TCP‑сервера `TcpBrainServer`.
 - heartbeat‑цикл (обновляет `Console.Title`, отправляет log heartbeat).
 - запуск одного из циклов:
-  - `LifeLoop.RunAsync` (v0.2),
+  - `LifeLoop.RunAsync` (v0.2/v0.3),
   - либо `RunBrainLoopAsync` (v0.1).
 - командный цикл:
   - `trace` — вкл/выкл отображение trace в консоли;
@@ -153,7 +157,7 @@ FileBatchWriter:
 Поля:
 - `_listener` (`TcpListener`), `_sessions` (`ConcurrentDictionary`).
 - `_lifeOutputs` — буфер последних output‑сообщений (до 50) для повторной синхронизации Studio.
-- делегаты управления v0.1 (`_onBrainStart/Stop/Step`) и v0.2 (`_onLifeStart/Stop/Step`).
+- делегаты управления v0.1 (`_onBrainStart/Stop/Step`) и v0.2/v0.3 (`_onLifeStart/Stop/Step`).
 Методы:
 - `StartAsync` → запускает accept‑loop.
 - `AcceptLoopAsync` → принимает клиентов и создает `ClientSession`.
@@ -166,7 +170,7 @@ FileBatchWriter:
 Назначение: одна TCP‑сессия.
 Поля:
 - `_client`, `_stream`.
-- делегаты управления v0.1 и v0.2.
+- делегаты управления v0.1 и v0.2/v0.3.
 - флаги подписок: `_wantsLogs`, `_wantsState`, `_wantsTrace`, `_wantsLifeState`, `_wantsLifeOutput`.
 RunAsync:
 - читает `Envelope` через `Framing.ReadEnvelopeAsync`;
@@ -177,7 +181,7 @@ HandleAsync:
 - `logs.subscribe`, `brain.state.subscribe`, `trace.subscribe`, `brain.life.state.subscribe`, `brain.life.output.subscribe` → включают флаги и логируют.
 - при `brain.life.output.subscribe` отправляет накопленные outputs из буфера сервера.
 - `brain.start/stop/step` → вызывают делегаты v0.1.
-- `brain.life.start/stop/step` → делегаты v0.2.
+- `brain.life.start/stop/step` → делегаты v0.2/v0.3.
 - `input.set` → десериализация `BrainInputDto`.
 - `event.push` → десериализация `BrainEventDto`.
 Отправка:
@@ -257,7 +261,7 @@ HandleAsync:
 
 ---
 
-## 4) Brain v0.2 (жизненный цикл)
+## 4) Brain v0.3 (жизненный цикл с инерцией/памятью/анти‑петлей)
 
 ### src/DeepBrain.Host/BrainLife/LifeMath.cs
 Назначение: утилита `Clamp01`.
@@ -282,20 +286,42 @@ HandleAsync:
 Формулы: SelfPreservation, EnergyConservation, Exploration, Attachment, Agency (0..1).
 
 ### src/DeepBrain.Host/BrainLife/EmotionEngine.cs
-Назначение: расчет `Affect`.
-Правила: mood (anxious/curious/low/frustrated/calm), valence и arousal.
+Назначение: базовый расчет `Affect` (без инерции).
+
+### src/DeepBrain.Host/BrainLife/MoodInertiaEngine.cs
+Назначение: инерция аффекта.
+Поведение:
+- Valence/Arousal сглаживаются `lerp(prev, computed, alpha)` с alpha 0.15–0.35.
+- Mood меняется только при устойчивости кандидата (>=3 тика) или при высоком SelfPreservation.
+- Возвращает `MoodInertia` как 1‑alpha.
+
+### src/DeepBrain.Host/BrainLife/DominantDriveResolver.cs
+Назначение: определяет доминирующий драйв по максимальному инстинкту.
+
+### src/DeepBrain.Host/BrainLife/EpisodeMemory.cs
+Назначение: эпизодическая память.
+Поведение:
+- хранит ring‑buffer последних 1000 эпизодов;
+- `QuerySimilar` ищет похожие по дистанции (Energy/Fatigue/Safety/Arousal).
+
+### src/DeepBrain.Host/BrainLife/LoopDetector.cs
+Назначение: анти‑петля.
+Поведение:
+- считает `SameActionStreak`;
+- хранит окно наград (`AvgRewardShort`);
+- при петле повышает `LoopPenalty` и `LoopCount`, иначе снижает.
 
 ### src/DeepBrain.Host/BrainLife/LearningEngine.cs
 Назначение: EMA‑обучение по действиям.
 Методы: `Update`, `GetEma`, `GetBest`.
 
 ### src/DeepBrain.Host/BrainLife/ActionSelector.cs
-Назначение: выбор действия (System 1).
+Назначение: выбор действия (System 1) с учетом стратегии, памяти и анти‑петли.
 Алгоритм:
-- формирует кандидатов по инстинктам и настроению;
-- добавляет bias от EMA;
-- добавляет бонус к внешним действиям;
-- выбирает по score, tie‑break по имени.
+- определяет `strategy` (explore/regulate/rest/connect/focus) по драйвам и состоянию;
+- формирует кандидатов по стратегии;
+- скоринг: `base + EMA + externalBonus - loopPenalty - badMemory + goodMemory`;
+- если `LoopPenalty > 0.4`, сильно штрафует повтор `LastAction`.
 
 ### src/DeepBrain.Host/BrainLife/Actuator.cs
 Назначение: применение действия к homeostasis/affect.
@@ -308,22 +334,23 @@ HandleAsync:
 Формула: энергия+безопасность − (fatigue+pain)*0.5.
 
 ### src/DeepBrain.Host/BrainLife/LifeLoop.cs
-Назначение: главный цикл v0.2.
+Назначение: главный цикл v0.3.
 Шаги:
 1) `world.Tick`.
 2) `homeostasis.Update`.
 3) `instincts.Compute`.
-4) `emotion.Compute`.
-5) `action.Select`.
-6) `actuator.Apply`.
-7) `reward.Compute`.
-8) `learning.Update`.
-9) формирование `LifeStateDto`.
-10) broadcast `brain.life.state`.
-11) запись `EpisodeDto` в ring‑buffer.
+4) `emotion.Compute` → `MoodInertiaEngine.Apply`.
+5) `DominantDriveResolver.Resolve`.
+6) `ActionSelector.Choose` (strategy + anti‑петля + память).
+7) `actuator.Apply`.
+8) `reward.Compute`, `LearningEngine.Update`, `LoopDetector.Update`.
+9) `EpisodeMemory.Add`.
+10) формирование `LifeStateDto` с `Policy`, `DominantDrive`, `MoodInertia`.
+11) broadcast `brain.life.state`.
 12) trace по стадиям (homeostasis/instincts/affect/decision/action/reward/output).
-13) диагностика: первые 200 тиков — лог каждые 20 тиков.
-14) если есть `Outcome.Message`, формируется `LifeOutputDto` и отправляется наружу (лог + trace + output‑message).
+13) диагностика: каждые 20 тиков (mood/drive/strategy/streak/avgR/loopPenalty).
+14) если `SameActionStreak > 10` — `LOOP WARNING`.
+15) если есть `Outcome.Message`, формируется `LifeOutputDto` и отправляется наружу (log + trace + output).
 
 ---
 
@@ -354,6 +381,8 @@ HandleAsync:
 - `OnLifeOutput` — добавление output‑сообщений (последние 50).
 Connect: ping + подписки logs/state/trace/life/output.
 Heartbeat: переключает символ в UI при log‑строках содержащих "heartbeat".
+v0.3 поля:
+- strategy, dominantDrive, loopPenalty/streak, avgRewardShort, moodInertia.
 
 ### src/DeepBrain.Studio/Net/TcpClientService.cs
 Назначение: TCP‑клиент.
@@ -374,6 +403,6 @@ Heartbeat: переключает символ в UI при log‑строках
 ---
 
 ## Итог
-- Проект содержит два параллельных мозга: v0.1 (старый) и v0.2 (LifeLoop).
-- Ветка v0.2 по умолчанию активна и вещает телеметрию.
+- Проект содержит два параллельных мозга: v0.1 (старый) и v0.3 (LifeLoop с инерцией/памятью/анти‑петлей).
+- Ветка v0.3 по умолчанию активна и вещает расширенную телеметрию.
 - Studio — только наблюдение и вывод состояния, без управления мозгом.

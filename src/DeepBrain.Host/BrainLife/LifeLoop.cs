@@ -17,6 +17,10 @@ public sealed class LifeLoop
     private readonly Action<TraceDto, CancellationToken> _trace;
     private readonly Action<LifeOutputDto, CancellationToken> _output;
     private readonly Action<string> _log;
+    private readonly EpisodeMemory _memory = new();
+    private readonly LoopDetector _loop = new();
+    private readonly MoodInertiaEngine _inertia = new();
+    private readonly DominantDriveResolver _driveResolver = new();
 
     private HomeostasisDto _homeo = new(0.7, 0.2, 0.3, 0.1, 0.7);
     private AffectDto _affect = new("calm", 0.2, 0.3);
@@ -96,9 +100,12 @@ public sealed class LifeLoop
             Agency = LifeMath.Clamp01(instincts.Agency - _agencyOffset)
         };
 
-        _affect = _emotion.Compute(instincts, _homeo);
+        var computedAffect = _emotion.Compute(instincts, _homeo);
+        var (inertAffect, moodInertia) = _inertia.Apply(_affect, computedAffect, instincts.SelfPreservation);
+        _affect = inertAffect;
 
-        var (action, reason) = _selector.Choose(_homeo, instincts, _affect, _learning);
+        var dominantDrive = _driveResolver.Resolve(instincts);
+        var (action, reason, strategy) = _selector.Choose(_homeo, instincts, _affect, _learning, _loop, _memory, dominantDrive);
         EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason }, ct);
 
         var outcome = _actuator.Apply(action, ref _homeo, ref _affect);
@@ -113,6 +120,7 @@ public sealed class LifeLoop
 
         var reward = _reward.Compute(beforeHomeo, _homeo);
         _learning.Update(action.Name, reward);
+        _loop.Update(action.Name, reward);
 
         outcome = new OutcomeDto(outcome.Action, reward, outcome.Message);
 
@@ -146,6 +154,16 @@ public sealed class LifeLoop
             _output(new LifeOutputDto(_tick, DateTimeOffset.Now, msg, action.Name), ct);
         }
 
+        var policy = new DeepBrain.Shared.BrainDtos.V2.PolicyContextDto(
+            strategy,
+            $"drive={dominantDrive} loopPenalty={_loop.LoopPenalty:0.00} -> {strategy}:{action.Name}",
+            _loop.LoopCount,
+            _loop.LoopPenalty,
+            _loop.LastAction,
+            _loop.SameActionStreak,
+            _loop.AvgRewardShort
+        );
+
         var state = new LifeStateDto(
             _tick,
             DateTimeOffset.Now,
@@ -153,7 +171,10 @@ public sealed class LifeLoop
             instincts,
             _affect,
             action.Name,
-            reward
+            reward,
+            policy,
+            dominantDrive,
+            moodInertia
         );
 
         var episode = new EpisodeDto(
@@ -166,20 +187,21 @@ public sealed class LifeLoop
         );
 
         AppendEpisode(episode);
+        _memory.Add(episode);
 
         _broadcast(state, ct);
 
         if (_tick < DiagnosticTicks && _tick % 20 == 0)
         {
-            var (bestAction, bestEma) = _learning.GetBest();
-            var reasonShort = reason.Length > 48 ? reason[..48] + "..." : reason;
-            var line = $"tick={_tick} | mood={_affect.Mood} | energy={_homeo.Energy:0.00} | fatigue={_homeo.Fatigue:0.00} | safety={_homeo.Safety:0.00} | action={action.Name}({action.Kind}) | reward={reward:0.000} | emaBest={bestAction}:{bestEma:0.000} | reason={reasonShort}";
+            var line = $"tick={_tick} | mood={_affect.Mood}({ _affect.Valence:0.00}/{ _affect.Arousal:0.00}) | drive={dominantDrive} | strategy={strategy} | action={action.Name}({action.Kind}) | reward={reward:0.000} | streak={_loop.SameActionStreak} | avgR={_loop.AvgRewardShort:0.000} | loopPenalty={_loop.LoopPenalty:0.00}";
             _log(line);
             if (!string.IsNullOrWhiteSpace(_outputSinceDiag))
             {
                 _log($"OUTPUT: {_outputSinceDiag}");
                 _outputSinceDiag = null;
             }
+            if (_loop.SameActionStreak > 10)
+                _log($"LOOP WARNING: strategy={strategy} action={action.Name}");
         }
 
         _tick++;

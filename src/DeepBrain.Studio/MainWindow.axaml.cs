@@ -119,6 +119,12 @@ public partial class MainWindow : Window
         LifeInstinctsText.Text = $"instincts: self={state.Instincts.SelfPreservation:0.00} energy={state.Instincts.EnergyConservation:0.00} explore={state.Instincts.Exploration:0.00} attach={state.Instincts.Attachment:0.00} agency={state.Instincts.Agency:0.00}";
         LifeDecisionText.Text = $"lastDecision={state.LastDecision}";
         LifeRewardText.Text = $"lastReward={state.LastReward:0.000}  tick={state.Tick}";
+        var policy = state.Policy;
+        LifeStrategyText.Text = $"strategy={policy?.Strategy ?? "n/a"} reason={policy?.Reason ?? ""}";
+        LifeDriveText.Text = $"drive={state.DominantDrive}";
+        LifeLoopText.Text = $"loopPenalty={policy?.LoopPenalty:0.00} streak={policy?.SameActionStreak} loops={policy?.LoopCount}";
+        LifeAvgRewardText.Text = $"avgRewardShort={policy?.AvgRewardShort:0.000}";
+        LifeInertiaText.Text = $"moodInertia={state.MoodInertia:0.00}";
     }
 
     private async Task RunSafeAsync(Func<Task> action)

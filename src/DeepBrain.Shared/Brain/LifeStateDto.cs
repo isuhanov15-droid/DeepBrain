@@ -1,5 +1,7 @@
 namespace DeepBrain.Shared.Brain;
 
+using DeepBrain.Shared.BrainDtos.V2;
+
 public sealed record LifeStateDto(
     long Tick,
     DateTimeOffset Ts,
@@ -7,5 +9,8 @@ public sealed record LifeStateDto(
     InstinctsDto Instincts,
     AffectDto Affect,
     string LastDecision,
-    double LastReward
+    double LastReward,
+    PolicyContextDto? Policy = null,
+    string DominantDrive = "",
+    double MoodInertia = 0.0
 );

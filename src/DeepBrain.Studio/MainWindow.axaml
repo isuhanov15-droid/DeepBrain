@@ -40,6 +40,11 @@
 						<TextBlock Name="LifeInstinctsText"/>
 						<TextBlock Name="LifeDecisionText"/>
 						<TextBlock Name="LifeRewardText"/>
+						<TextBlock Name="LifeStrategyText"/>
+						<TextBlock Name="LifeDriveText"/>
+						<TextBlock Name="LifeLoopText"/>
+						<TextBlock Name="LifeAvgRewardText"/>
+						<TextBlock Name="LifeInertiaText"/>
 					</StackPanel>
 				</Border>
 				<TextBlock Grid.Row="1" Text="Outputs" FontWeight="Bold" Margin="0,8,0,4"/>
