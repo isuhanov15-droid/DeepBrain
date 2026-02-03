@@ -1,0 +1,124 @@
+namespace DeepBrain.Host.BrainLife;
+
+public sealed record BrainConfig(
+    WorldConfig World,
+    PainConfig Pain,
+    DrivesConfig Drives,
+    ActionsConfig Actions,
+    MoodConfig Mood,
+    bool UseMlAdvisor = false)
+{
+    public static BrainConfig Default => new(
+        new WorldConfig(
+            BaselineThreat: 0.10,
+            ThreatReturnRatePerSec: 0.06,
+            ShockChanceBase: 0.01,
+            MicroThreatChanceBase: 0.03,
+            NoveltyChanceBase: 0.02,
+            CalmWindowChanceBase: 0.02,
+            DriftRatePerSec: 0.02,
+            BaselineTension: 0.25
+        ),
+        new PainConfig(
+            BaselinePain: 0.12,
+            PainReturnRatePerSec: 0.08,
+            DecayPerSec: 0.04,
+            ThreatK: 0.020,
+            FatigueK: 0.030,
+            SleepK: 0.030,
+            CalmBonusPerSec: 0.03,
+            SafetyBonusPerSec: 0.02
+        ),
+        new DrivesConfig(
+            WeightSelfPreservation: 1.0,
+            WeightExploration: 1.0,
+            WeightAttachment: 1.0,
+            WeightAgency: 1.0,
+            SoftmaxTemperature: 1.0
+        ),
+        new ActionsConfig(
+            BreatheSlow: 3,
+            RestShort: 5,
+            ReframeNegative: 3,
+            FocusNarrow: 2,
+            FocusWiden: 2,
+            ExploreSignal: 2,
+            EmitMessage: 60,
+            EmitCooldownCalm: 60,
+            EmitCooldownTender: 60,
+            EmitCooldownWitty: 65,
+            EmitCooldownFiery: 75
+        ),
+        new MoodConfig(
+            CalmValenceMin: 0.05,
+            CalmArousalMax: 0.30,
+            CalmPainMax: 0.20,
+            AnxiousPainMin: 0.35,
+            AnxiousThreatIntensityMin: 0.60,
+            AnxiousStressMin: 0.50,
+            CuriousNoveltyMin: 0.35,
+            CuriousArousalMin: 0.25,
+            CuriousArousalMax: 0.45,
+            TenderSocialMin: 0.35,
+            TenderArousalMax: 0.35
+        )
+    );
+}
+
+public sealed record WorldConfig(
+    double BaselineThreat,
+    double ThreatReturnRatePerSec,
+    double ShockChanceBase,
+    double MicroThreatChanceBase,
+    double NoveltyChanceBase,
+    double CalmWindowChanceBase,
+    double DriftRatePerSec,
+    double BaselineTension
+);
+
+public sealed record PainConfig(
+    double BaselinePain,
+    double PainReturnRatePerSec,
+    double DecayPerSec,
+    double ThreatK,
+    double FatigueK,
+    double SleepK,
+    double CalmBonusPerSec,
+    double SafetyBonusPerSec
+);
+
+public sealed record DrivesConfig(
+    double WeightSelfPreservation,
+    double WeightExploration,
+    double WeightAttachment,
+    double WeightAgency,
+    double SoftmaxTemperature
+);
+
+public sealed record ActionsConfig(
+    int BreatheSlow,
+    int RestShort,
+    int ReframeNegative,
+    int FocusNarrow,
+    int FocusWiden,
+    int ExploreSignal,
+    int EmitMessage,
+    int EmitCooldownCalm,
+    int EmitCooldownTender,
+    int EmitCooldownWitty,
+    int EmitCooldownFiery
+);
+
+public sealed record MoodConfig(
+    double CalmValenceMin,
+    double CalmArousalMax,
+    double CalmPainMax,
+    double AnxiousPainMin,
+    double AnxiousThreatIntensityMin,
+    double AnxiousStressMin,
+    double CuriousNoveltyMin,
+    double CuriousArousalMin,
+    double CuriousArousalMax,
+    double TenderSocialMin,
+    double TenderArousalMax
+);

@@ -1,0 +1,56 @@
+{
+  "world": {
+    "baselineThreat": 0.10,
+    "threatReturnRatePerSec": 0.06,
+    "shockChanceBase": 0.01,
+    "microThreatChanceBase": 0.03,
+    "noveltyChanceBase": 0.02,
+    "calmWindowChanceBase": 0.02,
+    "driftRatePerSec": 0.02,
+    "baselineTension": 0.25
+  },
+  "pain": {
+    "baselinePain": 0.12,
+    "painReturnRatePerSec": 0.08,
+    "decayPerSec": 0.04,
+    "threatK": 0.020,
+    "fatigueK": 0.030,
+    "sleepK": 0.030,
+    "calmBonusPerSec": 0.03,
+    "safetyBonusPerSec": 0.02
+  },
+  "drives": {
+    "weightSelfPreservation": 1.0,
+    "weightExploration": 1.0,
+    "weightAttachment": 1.0,
+    "weightAgency": 1.0,
+    "softmaxTemperature": 1.0
+  },
+  "actions": {
+    "breatheSlow": 3,
+    "restShort": 5,
+    "reframeNegative": 3,
+    "focusNarrow": 2,
+    "focusWiden": 2,
+    "exploreSignal": 2,
+    "emitMessage": 60,
+    "emitCooldownCalm": 60,
+    "emitCooldownTender": 60,
+    "emitCooldownWitty": 65,
+    "emitCooldownFiery": 75
+  },
+  "mood": {
+    "calmValenceMin": 0.05,
+    "calmArousalMax": 0.30,
+    "calmPainMax": 0.20,
+    "anxiousPainMin": 0.35,
+    "anxiousThreatIntensityMin": 0.60,
+    "anxiousStressMin": 0.50,
+    "curiousNoveltyMin": 0.35,
+    "curiousArousalMin": 0.25,
+    "curiousArousalMax": 0.45,
+    "tenderSocialMin": 0.35,
+    "tenderArousalMax": 0.35
+  },
+  "useMlAdvisor": false
+}
