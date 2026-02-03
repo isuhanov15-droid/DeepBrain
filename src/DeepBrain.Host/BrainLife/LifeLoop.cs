@@ -47,6 +47,11 @@ public sealed class LifeLoop
     private double _sumPain;
     private double _sumSafety;
     private double _sumArousal;
+    private double _sumThreat;
+    private double _sumCalm;
+    private double _sumStress;
+    private int _painClampedCount;
+    private readonly List<double> _painSamples = new(256);
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
 
@@ -481,16 +486,19 @@ public sealed class LifeLoop
         var threatEvents = eventsList.Where(e => (e.Type == "threat_spike" || e.Type == "micro_threat") && e.Salience > 0.3).ToList();
         var calmEvent = eventsList.Any(e => e.Type == "calm_window" && e.Salience > 0.3);
 
-        var threatComponent = _world.Threat * 0.05 + threatEvents.Sum(e => e.Severity) * 0.03;
-        var fatigueComponent = Math.Max(0, homeo.Fatigue - 0.6) * 0.05;
-        var sleepComponent = Math.Max(0, circ.SleepPressure - 0.7) * 0.05;
+        var threatComponent = _world.Threat * 0.020 + threatEvents.Sum(e => e.Severity) * 0.015;
+        var fatigueComponent = Math.Max(0, homeo.Fatigue - 0.6) * 0.030;
+        var sleepComponent = Math.Max(0, circ.SleepPressure - 0.7) * 0.030;
 
-        var decay = 0.02 * dtSeconds;
+        var baselinePain = 0.12;
+        var painReturnRatePerSec = 0.08;
+        var decay = 0.04 * dtSeconds;
         var pain = homeo.Pain + dtSeconds * (threatComponent + fatigueComponent + sleepComponent) - decay;
+        pain -= (homeo.Pain - baselinePain) * painReturnRatePerSec * dtSeconds;
         if (calmEvent)
-            pain -= 0.01 * dtSeconds;
+            pain -= 0.03 * dtSeconds;
         if (homeo.Safety > 0.8)
-            pain -= 0.01 * dtSeconds;
+            pain -= 0.02 * dtSeconds;
 
         var safety = homeo.Safety;
         if (calmEvent)
@@ -560,6 +568,11 @@ public sealed class LifeLoop
         _sumPain += homeo.Pain;
         _sumSafety += homeo.Safety;
         _sumArousal += homeo.Arousal;
+        _sumThreat += _world.Threat;
+        _sumCalm += _world.CalmLevel;
+        _sumStress += _world.StressLevel;
+        if (homeo.Pain >= 0.999) _painClampedCount++;
+        _painSamples.Add(homeo.Pain);
 
         _actionCounts[actionName] = _actionCounts.TryGetValue(actionName, out var count) ? count + 1 : 1;
     }
@@ -574,6 +587,10 @@ public sealed class LifeLoop
         var avgPain = _sumPain / _statsTicks;
         var avgSafety = _sumSafety / _statsTicks;
         var avgArousal = _sumArousal / _statsTicks;
+        var avgThreat = _sumThreat / _statsTicks;
+        var avgCalm = _sumCalm / _statsTicks;
+        var avgStress = _sumStress / _statsTicks;
+        var p95Pain = ComputeP95(_painSamples);
 
         var topActions = _actionCounts
             .OrderByDescending(kv => kv.Value)
@@ -587,7 +604,8 @@ public sealed class LifeLoop
         var novCount = _eventCounts.TryGetValue("novelty_opportunity", out var n) ? n : 0;
         var socialCount = _eventCounts.TryGetValue("social_ping", out var s) ? s : 0;
 
-        _log($"STATS(200): anxious={anxiousPct:0.00} calm={calmPct:0.00} curious={curiousPct:0.00} avgPain={avgPain:0.00} avgSafety={avgSafety:0.00} avgArousal={avgArousal:0.00}");
+        _log($"STATS(200): anxious={anxiousPct:0.00} calm={calmPct:0.00} curious={curiousPct:0.00} avgPain={avgPain:0.00} p95Pain={p95Pain:0.00} avgSafety={avgSafety:0.00} avgArousal={avgArousal:0.00}");
+        _log($"STATS climate: avgThreat={avgThreat:0.00} avgCalm={avgCalm:0.00} avgStress={avgStress:0.00} painClamped={_painClampedCount}");
         _log($"STATS actions: {string.Join(", ", topActions)}");
         _log($"STATS events: threat_spike={threatCount} micro_threat={microCount} calm_window={calmCount} novelty={novCount} social_ping={socialCount}");
 
@@ -598,8 +616,21 @@ public sealed class LifeLoop
         _sumPain = 0;
         _sumSafety = 0;
         _sumArousal = 0;
+        _sumThreat = 0;
+        _sumCalm = 0;
+        _sumStress = 0;
+        _painClampedCount = 0;
+        _painSamples.Clear();
         _actionCounts.Clear();
         _eventCounts.Clear();
+    }
+
+    private static double ComputeP95(List<double> samples)
+    {
+        if (samples.Count == 0) return 0;
+        var ordered = samples.OrderBy(v => v).ToList();
+        var index = (int)Math.Floor(0.95 * (ordered.Count - 1));
+        return ordered[index];
     }
 }
 

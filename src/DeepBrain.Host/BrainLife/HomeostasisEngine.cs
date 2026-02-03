@@ -14,8 +14,6 @@ public sealed class HomeostasisEngine
 
         fatigue = LifeMath.Clamp01(fatigue + dtSeconds * (0.01 + 0.05 * arousal));
         energy = LifeMath.Clamp01(energy - dtSeconds * (0.01 + 0.05 * fatigue + 0.03 * arousal));
-        safety = LifeMath.Clamp01(safety - dtSeconds * (0.04 * world.Threat) + dtSeconds * 0.005);
-        pain = LifeMath.Clamp01(pain + dtSeconds * (0.02 * fatigue + 0.05 * world.Threat) - dtSeconds * 0.01);
         arousal = LifeMath.Clamp01(arousal + dtSeconds * (0.02 * world.Noise - 0.01 * safety));
 
         return new HomeostasisDto(energy, fatigue, arousal, pain, safety);

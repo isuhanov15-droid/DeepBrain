@@ -15,6 +15,8 @@ public sealed class WorldSim
     public double StressLevel { get; private set; } = 0.2;
     public double DriftRatePerSec { get; } = 0.02;
     public double ShockChanceBase { get; } = 0.01;
+    public double BaselineThreat { get; } = 0.10;
+    public double ThreatReturnRatePerSec { get; } = 0.06;
 
     public WorldEventsQueue Events => _events;
     public string LastMajorEvent => _lastMajorEvent;
@@ -34,6 +36,8 @@ public sealed class WorldSim
         Novelty = LifeMath.Clamp01(Novelty + RandDelta(0.02));
         SocialPresence = LifeMath.Clamp01(SocialPresence + RandDelta(0.01));
         Threat = LifeMath.Clamp01(Threat + RandDelta(0.005));
+        Threat = LifeMath.Clamp01(Threat + (BaselineThreat - Threat) * ThreatReturnRatePerSec * dtSeconds);
+        Threat = LifeMath.Clamp01(Threat - CalmLevel * 0.01 * dtSeconds);
 
         var threatCooldownSec = (tick - _lastThreatTick) * dtSeconds;
         var canThreat = threatCooldownSec > 20;
@@ -101,7 +105,7 @@ public sealed class WorldSim
                 StressLevel = LifeMath.Clamp01(StressLevel + 0.15);
                 break;
             case "micro_threat":
-                Threat = LifeMath.Clamp01(Threat + ev.Severity * 0.3);
+                Threat = LifeMath.Clamp01(Threat + ev.Severity * 0.15);
                 StressLevel = LifeMath.Clamp01(StressLevel + 0.05);
                 break;
             case "novelty_opportunity":
@@ -115,7 +119,7 @@ public sealed class WorldSim
                 Noise = LifeMath.Clamp01(Noise + ev.Severity * 0.3);
                 break;
             case "calm_window":
-                Threat = LifeMath.Clamp01(Threat - ev.Severity * 0.4);
+                Threat = LifeMath.Clamp01(Threat - ev.Severity * 0.6);
                 CalmLevel = LifeMath.Clamp01(CalmLevel + 0.1);
                 break;
         }

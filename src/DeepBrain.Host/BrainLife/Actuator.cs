@@ -15,7 +15,8 @@ public sealed class Actuator
                 {
                     Energy = LifeMath.Clamp01(homeo.Energy + 0.04 * action.Strength),
                     Fatigue = LifeMath.Clamp01(homeo.Fatigue - 0.03 * action.Strength),
-                    Arousal = LifeMath.Clamp01(homeo.Arousal - 0.01 * action.Strength)
+                    Arousal = LifeMath.Clamp01(homeo.Arousal - 0.01 * action.Strength),
+                    Pain = LifeMath.Clamp01(homeo.Pain - 0.03 * action.Strength)
                 };
                 break;
 
@@ -24,7 +25,7 @@ public sealed class Actuator
                 {
                     Arousal = LifeMath.Clamp01(homeo.Arousal - 0.05 * action.Strength),
                     Safety = LifeMath.Clamp01(homeo.Safety + 0.02 * action.Strength),
-                    Pain = LifeMath.Clamp01(homeo.Pain - 0.01 * action.Strength)
+                    Pain = LifeMath.Clamp01(homeo.Pain - 0.03 * action.Strength)
                 };
                 break;
 
