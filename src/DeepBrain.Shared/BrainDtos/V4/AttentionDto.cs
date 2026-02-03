@@ -4,5 +4,7 @@ public sealed record AttentionDto(
     string Focus1,
     string? Focus2,
     double Intensity,
-    string Reason
+    string Reason,
+    string TopTarget,
+    double ThreatIntensity
 );

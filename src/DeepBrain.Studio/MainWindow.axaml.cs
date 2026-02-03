@@ -197,7 +197,7 @@ public partial class MainWindow : Window
 
         if (state.Climate is not null)
         {
-            LifeClimateText.Text = $"climate=calm:{state.Climate.CalmLevel:0.00} stress:{state.Climate.StressLevel:0.00}";
+            LifeClimateText.Text = $"climate=calm:{state.Climate.Calm:0.00} stress:{state.Climate.Stress:0.00} tension:{state.Climate.Tension:0.00} base:{state.Climate.BaselineTension:0.00}";
         }
         else
         {
@@ -206,7 +206,7 @@ public partial class MainWindow : Window
 
         if (state.PainSource is not null)
         {
-            LifePainSourceText.Text = $"painSource=threat:{state.PainSource.Threat:0.00} fatigue:{state.PainSource.Fatigue:0.00} sleep:{state.PainSource.Sleep:0.00}";
+            LifePainSourceText.Text = $"painSource=threat:{state.PainSource.Threat:0.00} fatigue:{state.PainSource.Fatigue:0.00} sleep:{state.PainSource.Sleep:0.00} recovery:{state.PainSource.Recovery:0.00}";
         }
         else
         {

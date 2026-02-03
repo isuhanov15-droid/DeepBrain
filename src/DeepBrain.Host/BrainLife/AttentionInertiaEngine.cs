@@ -24,7 +24,7 @@ public sealed class AttentionInertiaEngine
             _pendingTicks = 0;
             _pendingFocus = null;
             _lastIntensity = computed.Intensity;
-            return computed;
+            return computed with { TopTarget = computed.Focus1 };
         }
 
         if (computed.Intensity > _lastIntensity + _switchThreshold)
@@ -33,7 +33,7 @@ public sealed class AttentionInertiaEngine
             _lastIntensity = computed.Intensity;
             _pendingTicks = 0;
             _pendingFocus = null;
-            return computed;
+            return computed with { TopTarget = computed.Focus1 };
         }
 
         if (_pendingFocus == computed.Focus1)
@@ -50,7 +50,7 @@ public sealed class AttentionInertiaEngine
             _lastIntensity = computed.Intensity;
             _pendingTicks = 0;
             _pendingFocus = null;
-            return computed;
+            return computed with { TopTarget = computed.Focus1 };
         }
 
         _lastIntensity = Math.Max(0, _lastIntensity - 0.02);
@@ -59,7 +59,8 @@ public sealed class AttentionInertiaEngine
             Focus1 = _lastFocus,
             Focus2 = null,
             Intensity = _lastIntensity,
-            Reason = $"inertia:{computed.Reason}"
+            Reason = $"inertia:{computed.Reason}",
+            TopTarget = _lastFocus
         };
     }
 }

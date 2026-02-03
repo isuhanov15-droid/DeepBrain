@@ -11,8 +11,8 @@ public sealed class WorldSim
     public double Novelty { get; private set; } = 0.5;
     public double SocialPresence { get; private set; } = 0.4;
     public double Threat { get; private set; } = 0.1;
-    public double CalmLevel { get; private set; } = 0.6;
-    public double StressLevel { get; private set; } = 0.2;
+    public double Tension { get; private set; } = 0.25;
+    public double BaselineTension { get; } = 0.25;
     public double DriftRatePerSec { get; } = 0.02;
     public double ShockChanceBase { get; } = 0.01;
     public double BaselineThreat { get; } = 0.10;
@@ -20,6 +20,8 @@ public sealed class WorldSim
 
     public WorldEventsQueue Events => _events;
     public string LastMajorEvent => _lastMajorEvent;
+    public double CalmLevel => LifeMath.Clamp01(1.0 - Tension);
+    public double StressLevel => Tension;
 
     public WorldSim(int seed)
     {
@@ -102,15 +104,15 @@ public sealed class WorldSim
         {
             case "threat_spike":
                 Threat = LifeMath.Clamp01(Threat + ev.Severity * 0.6);
-                StressLevel = LifeMath.Clamp01(StressLevel + 0.15);
+                Tension = LifeMath.Clamp01(Tension + ev.Severity * 0.25);
                 break;
             case "micro_threat":
                 Threat = LifeMath.Clamp01(Threat + ev.Severity * 0.15);
-                StressLevel = LifeMath.Clamp01(StressLevel + 0.05);
+                Tension = LifeMath.Clamp01(Tension + ev.Severity * 0.08);
                 break;
             case "novelty_opportunity":
                 Novelty = LifeMath.Clamp01(Novelty + ev.Severity * 0.5);
-                CalmLevel = LifeMath.Clamp01(CalmLevel + 0.05);
+                Tension = LifeMath.Clamp01(Tension - ev.Severity * 0.10);
                 break;
             case "social_ping":
                 SocialPresence = LifeMath.Clamp01(SocialPresence + ev.Severity * 0.4);
@@ -120,7 +122,7 @@ public sealed class WorldSim
                 break;
             case "calm_window":
                 Threat = LifeMath.Clamp01(Threat - ev.Severity * 0.6);
-                CalmLevel = LifeMath.Clamp01(CalmLevel + 0.1);
+                Tension = LifeMath.Clamp01(Tension - ev.Severity * 0.30);
                 break;
         }
 
@@ -130,9 +132,7 @@ public sealed class WorldSim
 
     private void UpdateClimate(double dtSeconds)
     {
-        var calmDrift = DriftRatePerSec * dtSeconds * (0.6 - CalmLevel);
-        var stressDrift = DriftRatePerSec * dtSeconds * (0.2 - StressLevel);
-        CalmLevel = LifeMath.Clamp01(CalmLevel + calmDrift + RandDelta(0.01));
-        StressLevel = LifeMath.Clamp01(StressLevel + stressDrift + RandDelta(0.01));
+        var tensionDrift = DriftRatePerSec * dtSeconds * (BaselineTension - Tension);
+        Tension = LifeMath.Clamp01(Tension + tensionDrift + RandDelta(0.01));
     }
 }

@@ -12,18 +12,21 @@ public sealed class AttentionEngine
         InstinctsDto instincts,
         AffectDto affect,
         CircadianDto circadian,
-        IReadOnlyList<WorldEventDto> recentEvents)
+        IReadOnlyList<WorldEventDto> recentEvents,
+        double worldTension,
+        double dtSeconds)
     {
         var focus1 = "body";
         var focus2 = (string?)null;
-        var intensity = 0.4;
+        var intensity = 0.35;
         var reason = "baseline";
+        var threatIntensity = LifeMath.Clamp01(0.2 + worldTension * 0.4 + instincts.SelfPreservation * 0.2);
 
-        if (instincts.SelfPreservation > 0.7 || HasEvent(recentEvents, "threat_spike"))
+        if (instincts.SelfPreservation > 0.7 || HasEvent(recentEvents, "threat_spike") || HasEvent(recentEvents, "micro_threat"))
         {
             focus1 = "threat";
-            intensity = 0.8;
-            reason = "self_preservation/threat_spike";
+            intensity = LifeMath.Clamp01(0.5 + threatIntensity * 0.5);
+            reason = "self_preservation/threat_event";
         }
         else if (instincts.Exploration > 0.6 && (HasEvent(recentEvents, "calm_window") || HasEvent(recentEvents, "novelty_opportunity")))
         {
@@ -50,12 +53,17 @@ public sealed class AttentionEngine
             reason = "agency/negative_valence";
         }
 
+        if (focus1 != "threat" && !HasEvent(recentEvents, "threat_spike") && !HasEvent(recentEvents, "micro_threat") && worldTension < 0.35)
+        {
+            threatIntensity = Math.Max(0.2, threatIntensity - 0.2 * dtSeconds);
+        }
+
         if (focus1 == "threat" && homeo.Fatigue > 0.6)
             focus2 = "body";
         else if (focus1 == "novelty" && instincts.Attachment > 0.5)
             focus2 = "social";
 
-        return new AttentionDto(focus1, focus2, intensity, reason);
+        return new AttentionDto(focus1, focus2, intensity, reason, focus1, threatIntensity);
     }
 
     private static bool HasEvent(IReadOnlyList<WorldEventDto> eventsList, string type)

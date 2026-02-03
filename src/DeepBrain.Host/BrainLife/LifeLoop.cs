@@ -1,6 +1,7 @@
 ﻿using System.Linq;
 using System.Linq;
 using DeepBrain.Shared.Brain;
+using DeepBrain.Shared.BrainDtos.V4;
 using DeepBrain.Shared.Trace;
 
 namespace DeepBrain.Host.BrainLife;
@@ -43,6 +44,8 @@ public sealed class LifeLoop
     private int _anxiousCount;
     private int _calmCount;
     private int _curiousCount;
+    private int _neutralCount;
+    private int _tenderCount;
     private int _statsTicks;
     private double _sumPain;
     private double _sumSafety;
@@ -50,6 +53,7 @@ public sealed class LifeLoop
     private double _sumThreat;
     private double _sumCalm;
     private double _sumStress;
+    private double _sumThreatFocus;
     private int _painClampedCount;
     private readonly List<double> _painSamples = new(256);
     private bool _sleepConsolidated;
@@ -180,8 +184,8 @@ public sealed class LifeLoop
                     _cooldowns.GetLastTick("emit_message"),
                     _world.Events.ConsumedCount
                 ),
-                new DeepBrain.Shared.BrainDtos.V5.ClimateDto(_world.CalmLevel, _world.StressLevel),
-                new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0)
+                new DeepBrain.Shared.BrainDtos.V5.ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
+                new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, 0)
             );
             _broadcast(stateSleep, ct);
             _tick++;
@@ -197,7 +201,7 @@ public sealed class LifeLoop
             _eventCounts[ev.Type] = _eventCounts.TryGetValue(ev.Type, out var count) ? count + 1 : 1;
         var recentEvents = _world.Events.GetRecent(5);
         if (_tick % 50 == 0)
-            EmitTrace("world.climate", new { calm = _world.CalmLevel, stress = _world.StressLevel, lastMajor = _world.LastMajorEvent }, ct);
+            EmitTrace("world.climate", new { calm = _world.CalmLevel, stress = _world.StressLevel, tension = _world.Tension, baseline = _world.BaselineTension, lastMajor = _world.LastMajorEvent }, ct);
 
         _homeo = _homeostasis.Update(_homeo, _world, dtSeconds);
         var painSource = ApplyPainSafetyAdjustments(ref _homeo, circ, recentEvents, dtSeconds);
@@ -207,7 +211,9 @@ public sealed class LifeLoop
             Agency = LifeMath.Clamp01(instincts.Agency - _agencyOffset)
         };
 
-        var computedAffect = _emotion.Compute(instincts, _homeo);
+        var computedAttention = _attention.Compute(_homeo, instincts, _affect, circ, recentEvents, _world.Tension, dtSeconds);
+        var attention = _attentionInertia.Apply(computedAttention);
+        var computedAffect = _emotion.Compute(instincts, _homeo, _world.CalmLevel, _world.StressLevel, attention, recentEvents);
         var (inertAffect, moodInertia) = _inertia.Apply(_affect, computedAffect, instincts.SelfPreservation);
         _affect = inertAffect;
         _personality.ApplyBaselines(ref _affect, ref instincts);
@@ -225,8 +231,6 @@ public sealed class LifeLoop
             _log("PLAN INTERRUPTED");
 
         goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
-        var computedAttention = _attention.Compute(_homeo, instincts, _affect, circ, recentEvents);
-        var attention = _attentionInertia.Apply(computedAttention);
         var semanticKey = $"{_affect.Mood}+drive={dominantDrive}+phase={circ.Phase}+focus={attention.Focus1}";
         var cueKey = _habits.ComputeCue(attention, circ, _loop, recentEvents, _homeo);
         var (habitAction, habitStrength, habitId) = _habits.Suggest(cueKey);
@@ -375,7 +379,7 @@ public sealed class LifeLoop
                 _cooldowns.GetLastTick("emit_message"),
                 _world.Events.ConsumedCount
             ),
-            new DeepBrain.Shared.BrainDtos.V5.ClimateDto(_world.CalmLevel, _world.StressLevel),
+            new DeepBrain.Shared.BrainDtos.V5.ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
             painSource
         );
 
@@ -440,7 +444,7 @@ public sealed class LifeLoop
         if (habitUpdated is not null)
             _log($"HABIT_LEARN: {cueKey} -> {habitUpdated.Id} strength={habitUpdated.Strength:0.00} avgReward={habitUpdated.AvgReward:0.000}");
 
-        UpdateStats(action.Name, _affect.Mood, _homeo);
+        UpdateStats(action.Name, _affect.Mood, _homeo, attention);
         if (_tick > 0 && _tick % 200 == 0)
             EmitStats();
 
@@ -514,12 +518,18 @@ public sealed class LifeLoop
 
         var total = threatComponent + fatigueComponent + sleepComponent;
         if (total <= 0)
-            return new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0);
+            return new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, 0);
+
+        var posTotal = threatComponent + fatigueComponent + sleepComponent;
+        var recovery = Math.Max(0, decay + (calmEvent ? 0.03 * dtSeconds : 0) + (homeo.Safety > 0.8 ? 0.02 * dtSeconds : 0));
+        if (posTotal <= 0)
+            return new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, recovery > 0 ? 1 : 0);
 
         return new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(
-            threatComponent / total,
-            fatigueComponent / total,
-            sleepComponent / total
+            threatComponent / posTotal,
+            fatigueComponent / posTotal,
+            sleepComponent / posTotal,
+            recovery
         );
     }
 
@@ -558,12 +568,14 @@ public sealed class LifeLoop
         _episodes.Add(episode);
     }
 
-    private void UpdateStats(string actionName, string mood, HomeostasisDto homeo)
+    private void UpdateStats(string actionName, string mood, HomeostasisDto homeo, AttentionDto attention)
     {
         _statsTicks++;
         if (mood == "anxious") _anxiousCount++;
         if (mood == "calm") _calmCount++;
         if (mood == "curious") _curiousCount++;
+        if (mood == "neutral") _neutralCount++;
+        if (mood == "tender") _tenderCount++;
 
         _sumPain += homeo.Pain;
         _sumSafety += homeo.Safety;
@@ -571,6 +583,7 @@ public sealed class LifeLoop
         _sumThreat += _world.Threat;
         _sumCalm += _world.CalmLevel;
         _sumStress += _world.StressLevel;
+        _sumThreatFocus += attention.ThreatIntensity;
         if (homeo.Pain >= 0.999) _painClampedCount++;
         _painSamples.Add(homeo.Pain);
 
@@ -584,12 +597,15 @@ public sealed class LifeLoop
         var anxiousPct = _anxiousCount / (double)_statsTicks;
         var calmPct = _calmCount / (double)_statsTicks;
         var curiousPct = _curiousCount / (double)_statsTicks;
+        var neutralPct = _neutralCount / (double)_statsTicks;
+        var tenderPct = _tenderCount / (double)_statsTicks;
         var avgPain = _sumPain / _statsTicks;
         var avgSafety = _sumSafety / _statsTicks;
         var avgArousal = _sumArousal / _statsTicks;
         var avgThreat = _sumThreat / _statsTicks;
         var avgCalm = _sumCalm / _statsTicks;
         var avgStress = _sumStress / _statsTicks;
+        var avgThreatFocus = _sumThreatFocus / _statsTicks;
         var p95Pain = ComputeP95(_painSamples);
 
         var topActions = _actionCounts
@@ -604,14 +620,16 @@ public sealed class LifeLoop
         var novCount = _eventCounts.TryGetValue("novelty_opportunity", out var n) ? n : 0;
         var socialCount = _eventCounts.TryGetValue("social_ping", out var s) ? s : 0;
 
-        _log($"STATS(200): anxious={anxiousPct:0.00} calm={calmPct:0.00} curious={curiousPct:0.00} avgPain={avgPain:0.00} p95Pain={p95Pain:0.00} avgSafety={avgSafety:0.00} avgArousal={avgArousal:0.00}");
-        _log($"STATS climate: avgThreat={avgThreat:0.00} avgCalm={avgCalm:0.00} avgStress={avgStress:0.00} painClamped={_painClampedCount}");
+        _log($"STATS(200): anxious={anxiousPct:0.00} calm={calmPct:0.00} curious={curiousPct:0.00} neutral={neutralPct:0.00} tender={tenderPct:0.00} avgPain={avgPain:0.00} p95Pain={p95Pain:0.00} avgSafety={avgSafety:0.00} avgArousal={avgArousal:0.00}");
+        _log($"STATS climate: avgThreat={avgThreat:0.00} avgCalm={avgCalm:0.00} avgStress={avgStress:0.00} avgThreatFocus={avgThreatFocus:0.00} painClamped={_painClampedCount}");
         _log($"STATS actions: {string.Join(", ", topActions)}");
         _log($"STATS events: threat_spike={threatCount} micro_threat={microCount} calm_window={calmCount} novelty={novCount} social_ping={socialCount}");
 
         _anxiousCount = 0;
         _calmCount = 0;
         _curiousCount = 0;
+        _neutralCount = 0;
+        _tenderCount = 0;
         _statsTicks = 0;
         _sumPain = 0;
         _sumSafety = 0;
@@ -619,6 +637,7 @@ public sealed class LifeLoop
         _sumThreat = 0;
         _sumCalm = 0;
         _sumStress = 0;
+        _sumThreatFocus = 0;
         _painClampedCount = 0;
         _painSamples.Clear();
         _actionCounts.Clear();
