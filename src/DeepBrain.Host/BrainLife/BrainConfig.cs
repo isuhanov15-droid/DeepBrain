@@ -65,6 +65,7 @@ public sealed record BrainConfig(
         ),
         new MlConfig(
             Enable: false,
+            StrictRequireCore: false,
             Seed: 1337,
             LearningRate: 0.0005,
             Gamma: 0.98,
@@ -143,6 +144,7 @@ public sealed record MoodConfig(
 
 public sealed record MlConfig(
     bool Enable,
+    bool StrictRequireCore,
     int Seed,
     double LearningRate,
     double Gamma,

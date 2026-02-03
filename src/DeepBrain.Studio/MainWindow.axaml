@@ -19,54 +19,45 @@
 				</StackPanel>
 			</Grid>
 		</Border>
-		<Grid ColumnDefinitions="680,24,*" RowDefinitions="Auto,*" Margin="0,4,0,0">
-			<TextBlock Grid.Column="0" Text="Trace (last 50)" FontWeight="Bold"/>
-			<TextBlock Grid.Column="2" Text="Life" FontWeight="Bold"/>
-			<Border Grid.Row="1" Grid.Column="0" BorderThickness="1" Padding="8">
-				<ItemsControl Name="TraceList">
-					<ItemsControl.ItemTemplate>
-						<DataTemplate>
-							<TextBlock Text="{Binding}" TextWrapping="NoWrap" FontFamily="Consolas"/>
-						</DataTemplate>
-					</ItemsControl.ItemTemplate>
-				</ItemsControl>
-			</Border>
-			<GridSplitter Grid.Row="1" Grid.Column="1" Width="6"/>
-			<Grid Grid.Row="1" Grid.Column="2" RowDefinitions="Auto,Auto,160,Auto,*" Margin="12,0,0,0">
-				<Border Grid.Row="0" BorderThickness="1" Padding="8">
-					<StackPanel Spacing="4">
-						<TextBlock Name="LifeMoodText" FontWeight="Bold"/>
-						<TextBlock Name="LifeHomeostasisText"/>
-						<TextBlock Name="LifeInstinctsText"/>
-						<TextBlock Name="LifeDecisionText"/>
-						<TextBlock Name="LifeRewardText"/>
-						<TextBlock Name="LifeStrategyText"/>
-						<TextBlock Name="LifeDriveText"/>
-						<TextBlock Name="LifeLoopText"/>
-						<TextBlock Name="LifeAvgRewardText"/>
-						<TextBlock Name="LifeInertiaText"/>
-						<TextBlock Name="LifeCircadianText"/>
-						<TextBlock Name="LifePlanText"/>
-						<TextBlock Name="LifeGoalsText"/>
-						<TextBlock Name="LifeAttentionText"/>
-						<TextBlock Name="LifeEventsText"/>
-						<TextBlock Name="LifeSemanticText"/>
-						<TextBlock Name="LifeClimateText"/>
-						<TextBlock Name="LifePainSourceText"/>
-						<TextBlock Name="LifeConfigText"/>
-						<TextBlock Name="LifeAppraisalText"/>
-						<TextBlock Name="LifeStatsText"/>
-						<TextBlock Name="LifeMlText"/>
-						<TextBlock Name="LifeVoiceModeText"/>
-						<TextBlock Name="LifePersonalityText"/>
-						<TextBlock Name="LifeHabitsText"/>
-						<TextBlock Name="LifeActiveHabitText"/>
-						<TextBlock Name="LifeEmitText"/>
-						<TextBlock Name="LifeConsumedText"/>
-					</StackPanel>
+		<TabControl Margin="0,4,0,0">
+			<TabItem Header="Life">
+				<Border BorderThickness="1" Padding="8">
+					<ScrollViewer>
+						<StackPanel Spacing="4">
+							<TextBlock Name="LifeMoodText" FontWeight="Bold"/>
+							<TextBlock Name="LifeHomeostasisText"/>
+							<TextBlock Name="LifeInstinctsText"/>
+							<TextBlock Name="LifeDecisionText"/>
+							<TextBlock Name="LifeRewardText"/>
+							<TextBlock Name="LifeStrategyText"/>
+							<TextBlock Name="LifeDriveText"/>
+							<TextBlock Name="LifeLoopText"/>
+							<TextBlock Name="LifeAvgRewardText"/>
+							<TextBlock Name="LifeInertiaText"/>
+							<TextBlock Name="LifeCircadianText"/>
+							<TextBlock Name="LifePlanText"/>
+							<TextBlock Name="LifeGoalsText"/>
+							<TextBlock Name="LifeAttentionText"/>
+							<TextBlock Name="LifeEventsText"/>
+							<TextBlock Name="LifeSemanticText"/>
+							<TextBlock Name="LifeClimateText"/>
+							<TextBlock Name="LifePainSourceText"/>
+							<TextBlock Name="LifeConfigText"/>
+							<TextBlock Name="LifeAppraisalText"/>
+							<TextBlock Name="LifeStatsText"/>
+							<TextBlock Name="LifeMlText"/>
+							<TextBlock Name="LifeVoiceModeText"/>
+							<TextBlock Name="LifePersonalityText"/>
+							<TextBlock Name="LifeHabitsText"/>
+							<TextBlock Name="LifeActiveHabitText"/>
+							<TextBlock Name="LifeEmitText"/>
+							<TextBlock Name="LifeConsumedText"/>
+						</StackPanel>
+					</ScrollViewer>
 				</Border>
-				<TextBlock Grid.Row="1" Text="Outputs" FontWeight="Bold" Margin="0,8,0,4"/>
-				<Border Grid.Row="2" BorderThickness="1" Padding="8" Height="160" VerticalAlignment="Top">
+			</TabItem>
+			<TabItem Header="Output">
+				<Border BorderThickness="1" Padding="8">
 					<ScrollViewer VerticalScrollBarVisibility="Auto">
 						<ItemsControl Name="OutputsList">
 							<ItemsControl.ItemTemplate>
@@ -77,8 +68,22 @@
 						</ItemsControl>
 					</ScrollViewer>
 				</Border>
-				<TextBlock Grid.Row="3" Text="Logs" FontWeight="Bold" Margin="0,8,0,4"/>
-				<Border Grid.Row="4" BorderThickness="1" Padding="8">
+			</TabItem>
+			<TabItem Header="Trace">
+				<Border BorderThickness="1" Padding="8">
+					<ScrollViewer VerticalScrollBarVisibility="Auto">
+						<ItemsControl Name="TraceList">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate>
+									<TextBlock Text="{Binding}" TextWrapping="NoWrap" FontFamily="Consolas"/>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+					</ScrollViewer>
+				</Border>
+			</TabItem>
+			<TabItem Header="Logs">
+				<Border BorderThickness="1" Padding="8">
 					<ScrollViewer>
 						<ItemsControl Name="LogsList">
 							<ItemsControl.ItemTemplate>
@@ -89,8 +94,8 @@
 						</ItemsControl>
 					</ScrollViewer>
 				</Border>
-			</Grid>
-		</Grid>
+			</TabItem>
+		</TabControl>
 	</DockPanel>
 </Window>
 

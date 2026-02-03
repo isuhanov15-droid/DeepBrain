@@ -235,7 +235,7 @@ public partial class MainWindow : Window
 
         if (state.Ml is not null)
         {
-            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} dim:{state.Ml.InputDim} act:{state.Ml.ActionCount} w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000} buf:{state.Ml.BufferSize} ent:{state.Ml.Entropy:0.00} src:{state.Ml.PolicySource}";
+            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000}/avg:{state.Ml.AvgLoss100:0.000} buf:{state.Ml.BufferSize}/{state.Ml.BufferCapacity} ent:{state.Ml.Entropy:0.00} src:{state.Ml.PolicySource} nan:{state.Ml.NanSkips} ill:{state.Ml.IllegalChoiceCount} ov:{state.Ml.OverrideCount}";
         }
         else
         {

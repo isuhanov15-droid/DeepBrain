@@ -1,3 +1,4 @@
+#if ML_CORE
 namespace DeepBrain.Host.BrainLife.Ml;
 
 public sealed class OnlineTrainer
@@ -16,11 +17,11 @@ public sealed class OnlineTrainer
         _rng = rng;
     }
 
-    public bool TryTrain(long tick, MlConfig config)
+    public TrainOutcome TryTrain(long tick, MlConfig config)
     {
-        if (config.TrainEveryTicks <= 0) return false;
-        if (tick % config.TrainEveryTicks != 0) return false;
-        if (_buffer.Count < config.BatchSize || config.BatchSize <= 0) return false;
+        if (config.TrainEveryTicks <= 0) return TrainOutcome.None;
+        if (tick % config.TrainEveryTicks != 0) return TrainOutcome.None;
+        if (_buffer.Count < config.BatchSize || config.BatchSize <= 0) return TrainOutcome.None;
 
         var steps = Math.Max(1, config.TrainStepsPerBatch);
         var lossSum = 0.0;
@@ -31,7 +32,7 @@ public sealed class OnlineTrainer
             if (batch.Count == 0) break;
             var loss = _net.TrainBatch(batch, config.Gamma, config.GradClip);
             if (double.IsNaN(loss) || double.IsInfinity(loss))
-                break;
+                return TrainOutcome.NaN;
             lossSum += loss;
             TrainSteps++;
             didTrain = true;
@@ -40,6 +41,14 @@ public sealed class OnlineTrainer
         if (didTrain)
             LastLoss = lossSum / steps;
 
-        return didTrain;
+        return didTrain ? new TrainOutcome(true, LastLoss) : TrainOutcome.None;
     }
 }
+
+public readonly record struct TrainOutcome(bool Trained, double Loss)
+{
+    public static readonly TrainOutcome None = new(false, 0);
+    public static readonly TrainOutcome NaN = new(false, double.NaN);
+    public bool IsNaN => double.IsNaN(Loss) || double.IsInfinity(Loss);
+}
+#endif

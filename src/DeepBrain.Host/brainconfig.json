@@ -54,6 +54,7 @@
   },
   "ml": {
     "enable": false,
+    "strictRequireCore": false,
     "seed": 1337,
     "learningRate": 0.0005,
     "gamma": 0.98,

@@ -44,7 +44,7 @@ public sealed class LifeLoop
     private readonly MessageDedupeGuard _dedupe = new();
     private readonly CalmBaselineEngine _calmBaseline = new();
     private readonly AppraisalEngine _appraisal = new();
-    private readonly MlPolicyAdvisor _ml;
+    private readonly IMlPolicyAdvisor _ml;
     private readonly Dictionary<string, int> _actionCounts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _eventCounts = new(StringComparer.Ordinal);
     private int _anxiousCount;
@@ -69,6 +69,7 @@ public sealed class LifeLoop
     private LifeStatsDto _statsSnapshot = new(0, 0, 0, 0);
     private string _configVersion = "default";
     private MlPolicyDto? _mlTelemetry;
+    private bool _mlCoreMissingLogged;
     private bool _mlLoaded;
 
     private HomeostasisDto _homeo = new(0.7, 0.2, 0.3, 0.1, 0.7);
@@ -112,7 +113,7 @@ public sealed class LifeLoop
         _output = output;
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
-        _ml = new MlPolicyAdvisor(cfg.Ml);
+        _ml = MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
     }
 
     public void Start() => _running = true;
@@ -123,8 +124,19 @@ public sealed class LifeLoop
         var (cfg, _) = _configLoader.GetCurrent();
         var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
         _ml.Reset(mlCfg);
+        _ml.ResetCounters();
         _mlLoaded = true;
         _log("ML reset");
+    }
+
+    public string GetMlStatus()
+    {
+        var (cfg, _) = _configLoader.GetCurrent();
+        var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
+        if (!MlCoreAvailability.IsAvailable)
+            mlCfg = mlCfg with { Enable = false };
+        var t = _ml.BuildTelemetry(mlCfg.Enable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200);
+        return $"ml.enable={mlCfg.Enable} core={(MlCoreAvailability.IsAvailable ? "found" : "missing")} buf={t.BufferSize}/{t.BufferCapacity} eps={t.Epsilon:0.000} w={t.NetWeight:0.00} avgLoss100={t.AvgLoss100:0.000}";
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -155,6 +167,18 @@ public sealed class LifeLoop
         var (config, version) = _configLoader.GetCurrent();
         _configVersion = version;
         var mlConfig = config.Ml with { Enable = config.Ml.Enable || config.UseMlAdvisor };
+        if (!MlCoreAvailability.IsAvailable)
+        {
+            if (!_mlCoreMissingLogged)
+            {
+                if (mlConfig.StrictRequireCore)
+                    _log("ERROR: ML.Core not found, ml.enable forced false");
+                else
+                    _log("WARN: ML.Core not found, ml.enable forced false");
+                _mlCoreMissingLogged = true;
+            }
+            mlConfig = mlConfig with { Enable = false };
+        }
         if (mlConfig.Enable && !_mlLoaded)
         {
             if (_ml.TryLoad(mlConfig.CheckpointPath))

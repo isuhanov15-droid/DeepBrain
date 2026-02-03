@@ -1,21 +1,32 @@
+#if ML_CORE
 using System.Linq;
 using DeepBrain.Shared.BrainDtos.V6;
 
 namespace DeepBrain.Host.BrainLife.Ml;
 
-public sealed class MlPolicyAdvisor
+public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
 {
     private readonly StateVectorizer _vectorizer = new();
     private ExperienceBuffer _buffer;
     private PolicyNetAdapter _net;
     private readonly Random _rng;
     private readonly OnlineTrainer _trainer;
+    private readonly Action<string> _log;
+
+    private readonly Queue<double> _lossWindow = new(100);
+    private readonly Queue<bool> _overrideWindow = new(200);
 
     private double _entropy;
     private string _policySource = "heuristic";
+    private double _lastNetWeight;
+    private double _lastEpsilon;
+    private int _nanSkips;
+    private int _illegalChoiceCount;
+    private int _overrideCount;
 
-    public MlPolicyAdvisor(MlConfig config)
+    public MlPolicyAdvisorReal(MlConfig config, Action<string> log)
     {
+        _log = log;
         _rng = new Random(config.Seed);
         _buffer = new ExperienceBuffer(Math.Max(1024, config.BufferSize));
         _net = new PolicyNetAdapter(StateVectorizer.InputDim, ActionCatalog.Count, config.Seed, config.LearningRate);
@@ -30,19 +41,33 @@ public sealed class MlPolicyAdvisor
         _net.Reset(config.Seed, config.LearningRate);
         _entropy = 0;
         _policySource = "heuristic";
+        _lastNetWeight = 0;
+        _lastEpsilon = 0;
+        _nanSkips = 0;
+        _illegalChoiceCount = 0;
+        _overrideCount = 0;
+        _lossWindow.Clear();
+        _overrideWindow.Clear();
+    }
+
+    public void ResetCounters()
+    {
+        _nanSkips = 0;
+        _illegalChoiceCount = 0;
+        _overrideCount = 0;
+        _lossWindow.Clear();
+        _overrideWindow.Clear();
     }
 
     public PolicyDecision SelectAction(float[] stateVec, IReadOnlyDictionary<string, double> heuristicScores, IReadOnlyList<string> allowedActions, MlConfig config, long tick)
     {
-        if (!config.Enable)
-            return SelectHeuristic(heuristicScores, allowedActions);
-
-        if (stateVec.Length != _net.InputDim)
-            return SelectHeuristic(heuristicScores, allowedActions);
+        var heuristicBest = PickHeuristicBest(heuristicScores, allowedActions);
+        if (!config.Enable || stateVec.Length != _net.InputDim)
+            return new PolicyDecision(heuristicBest, 0, 0, 0, "heuristic", false, false, false);
 
         var probs = _net.PredictProbs(stateVec);
         if (probs.Length != ActionCatalog.Count || probs.Any(p => float.IsNaN(p) || float.IsInfinity(p)))
-            return SelectHeuristic(heuristicScores, allowedActions);
+            return new PolicyDecision(heuristicBest, 0, 0, 0, "heuristic", false, false, false);
 
         _entropy = ComputeEntropy(probs);
         var netWeight = ComputeNetWeight(config, _buffer.Count);
@@ -50,9 +75,19 @@ public sealed class MlPolicyAdvisor
 
         var finalScores = BlendScores(heuristicScores, probs, netWeight);
         var actionName = ChooseAction(finalScores, allowedActions, epsilon, _rng);
+        var illegal = !allowedActions.Contains(actionName);
+        if (illegal)
+        {
+            _illegalChoiceCount++;
+            actionName = heuristicBest;
+        }
+
+        var usedMl = netWeight > 0.01 && !illegal;
+        var overrideHeuristic = usedMl && actionName != heuristicBest;
+        PushOverride(overrideHeuristic);
 
         _policySource = netWeight <= 0.01 ? "heuristic" : netWeight >= 0.6 ? "net" : "blend";
-        return new PolicyDecision(actionName, netWeight, epsilon, _entropy, _policySource);
+        return new PolicyDecision(actionName, netWeight, epsilon, _entropy, _policySource, usedMl, illegal, overrideHeuristic);
     }
 
     public void Observe(float[] state, int actionIdx, float reward, float[] nextState, MlConfig config, long tick)
@@ -60,8 +95,20 @@ public sealed class MlPolicyAdvisor
         if (!config.Enable) return;
         if (actionIdx < 0 || actionIdx >= ActionCatalog.Count) return;
         if (state.Length != _net.InputDim || nextState.Length != _net.InputDim) return;
-        _buffer.Add(new Transition(state, actionIdx, reward, nextState, Done: false));
-        _trainer.TryTrain(tick, config);
+
+        var clampedReward = (float)Math.Clamp(reward, -1.0, 1.0);
+        _buffer.Add(new Transition(state, actionIdx, clampedReward, nextState, Done: false));
+        var result = _trainer.TryTrain(tick, config);
+        if (result.IsNaN)
+        {
+            _nanSkips++;
+            if (tick % 200 == 0)
+                _log("warn: ML train skipped due to NaN/Inf");
+            return;
+        }
+
+        if (result.Trained)
+            PushLoss(result.Loss);
     }
 
     public MlPolicyDto BuildTelemetry(bool enabled, int inputDim, int actionCount, double avgReward200)
@@ -72,27 +119,38 @@ public sealed class MlPolicyAdvisor
                 Enabled: false,
                 InputDim: inputDim,
                 ActionCount: actionCount,
-                NetWeight: 0,
-                Epsilon: 0,
                 BufferSize: _buffer.Count,
+                BufferCapacity: _buffer.Capacity,
+                Epsilon: 0,
+                NetWeight: 0,
                 LastLoss: _trainer.LastLoss,
-                TrainSteps: _trainer.TrainSteps,
+                AvgLoss100: AverageLoss(),
                 AvgReward200: avgReward200,
                 Entropy: 0,
+                TrainSteps: _trainer.TrainSteps,
+                NanSkips: _nanSkips,
+                IllegalChoiceCount: _illegalChoiceCount,
+                OverrideCount: _overrideCount,
                 PolicySource: "heuristic"
             );
         }
+
         return new MlPolicyDto(
             Enabled: enabled,
             InputDim: inputDim,
             ActionCount: actionCount,
-            NetWeight: ComputeNetWeightLast(),
-            Epsilon: ComputeEpsilonLast(),
             BufferSize: _buffer.Count,
+            BufferCapacity: _buffer.Capacity,
+            Epsilon: _lastEpsilon,
+            NetWeight: _lastNetWeight,
             LastLoss: _trainer.LastLoss,
-            TrainSteps: _trainer.TrainSteps,
+            AvgLoss100: AverageLoss(),
             AvgReward200: avgReward200,
             Entropy: _entropy,
+            TrainSteps: _trainer.TrainSteps,
+            NanSkips: _nanSkips,
+            IllegalChoiceCount: _illegalChoiceCount,
+            OverrideCount: _overrideCount,
             PolicySource: _policySource
         );
     }
@@ -104,9 +162,6 @@ public sealed class MlPolicyAdvisor
     }
 
     public bool TryLoad(string path) => _net.TryLoad(path);
-
-    private double _lastNetWeight;
-    private double _lastEpsilon;
 
     private double ComputeNetWeight(MlConfig config, int bufferSize)
     {
@@ -125,8 +180,33 @@ public sealed class MlPolicyAdvisor
         return eps;
     }
 
-    private double ComputeNetWeightLast() => _lastNetWeight;
-    private double ComputeEpsilonLast() => _lastEpsilon;
+    private void PushLoss(double loss)
+    {
+        if (_lossWindow.Count >= 100) _lossWindow.Dequeue();
+        _lossWindow.Enqueue(loss);
+    }
+
+    private double AverageLoss()
+    {
+        if (_lossWindow.Count == 0) return 0;
+        return _lossWindow.Average();
+    }
+
+    private void PushOverride(bool overrideHeuristic)
+    {
+        if (_overrideWindow.Count >= 200) _overrideWindow.Dequeue();
+        _overrideWindow.Enqueue(overrideHeuristic);
+        _overrideCount = _overrideWindow.Count(v => v);
+    }
+
+    private static string PickHeuristicBest(IReadOnlyDictionary<string, double> scores, IReadOnlyList<string> allowed)
+    {
+        return scores
+            .Where(kv => allowed.Count == 0 || allowed.Contains(kv.Key))
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => kv.Key)
+            .FirstOrDefault() ?? (allowed.Count > 0 ? allowed[0] : ActionCatalog.Actions[0]);
+    }
 
     private static string ChooseAction(Dictionary<string, double> scores, IReadOnlyList<string> allowed, double epsilon, Random rng)
     {
@@ -146,13 +226,6 @@ public sealed class MlPolicyAdvisor
         }
 
         return filtered[0].Key;
-    }
-    private PolicyDecision SelectHeuristic(IReadOnlyDictionary<string, double> scores, IReadOnlyList<string> allowed)
-    {
-        var dict = scores.ToDictionary(kv => kv.Key, kv => kv.Value);
-        var action = ChooseAction(dict, allowed, 0, _rng);
-        _policySource = "heuristic";
-        return new PolicyDecision(action, 0, 0, _entropy, "heuristic");
     }
 
     private static Dictionary<string, double> BlendScores(IReadOnlyDictionary<string, double> heuristicScores, float[] probs, double netWeight)
@@ -188,11 +261,4 @@ public sealed class MlPolicyAdvisor
         return sum / Math.Log(probs.Length);
     }
 }
-
-public readonly record struct PolicyDecision(
-    string ActionName,
-    double NetWeight,
-    double Epsilon,
-    double Entropy,
-    string PolicySource)
-{ }
+#endif

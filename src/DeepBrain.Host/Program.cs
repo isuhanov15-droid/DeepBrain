@@ -48,6 +48,8 @@ var logBuffer = new List<string>(500);
 var ui = new ConsoleUiState();
 var configPath = Path.Combine(AppContext.BaseDirectory, "brainconfig.json");
 var configLoader = new BrainConfigLoader(configPath, msg => LogLine(consoleLock, logBuffer, logWriter, msg));
+var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
+LogLine(consoleLock, logBuffer, logWriter, mlCoreAvailable ? "ML.Core: found" : "ML.Core: NOT found, ml.enable forced false if missing");
 lifeLoop = new LifeLoop(
     new WorldSim(seed: 1337),
     new HomeostasisEngine(),
@@ -188,7 +190,7 @@ static void RunCommandLoop(
     List<string> logBuffer,
     FileBatchWriter logWriter)
 {
-    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, death, exit");
+    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, mlstatus, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
@@ -226,6 +228,10 @@ static void RunCommandLoop(
                 break;
             case "resetml":
                 lifeLoop?.ResetMl();
+                break;
+            case "mlstatus":
+                if (lifeLoop is not null)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, lifeLoop.GetMlStatus());
                 break;
             case "death":
                 brain.Stop();

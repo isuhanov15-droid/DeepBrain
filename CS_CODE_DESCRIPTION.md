@@ -3,6 +3,7 @@
 Дата: 2026-02-02
 
 Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.8: суточный цикл, сон, консолидация памяти, микро‑планы, внимание, события мира, семантическая память, self-talk, throttling/инерция/затухание/регуляция, а также ML‑policy advisor и горячий конфиг.
+v0.8.1 добавляет безопасное подключение ML.Core через `ML_CORE_PATH`, stub‑режим без ML.Core и диагностику обучения.
 
 ---
 
@@ -173,6 +174,7 @@ MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
   - `start/stop` — управляют v0.1;
   - `logs` — печатает лог‑буфер;
   - `resetml` — сброс ML‑policy (буфер/сеть);
+  - `mlstatus` — печатает статус ML (enable, core, buffer, epsilon, netWeight, avgLoss100);
   - `death/exit` — завершение.
 
 RunBrainLoopAsync (v0.1):
@@ -398,6 +400,8 @@ v0.5:
 
 ### src/DeepBrain.Host/brainconfig.json
 Назначение: дефолтные параметры мира/болезни/драйвов/действий/настроения/ML.
+Дополнительно v0.8.1:
+- `ml.strictRequireCore` — если true и ML.Core не найден, Host пишет ERROR и выключает ML.
 
 ### src/DeepBrain.Host/BrainLife/AppraisalEngine.cs
 Назначение: оценивает threat/novelty/social/fatigue из мира, событий и состояния.
@@ -410,7 +414,20 @@ v0.5:
 - `BrainLife/Ml/ExperienceBuffer.cs` — буфер переходов (FIFO).
 - `BrainLife/Ml/PolicyNetAdapter.cs` — MLP на ML.Core, предсказание Q/softmax.
 - `BrainLife/Ml/OnlineTrainer.cs` — онлайн‑обучение DQN‑lite.
-- `BrainLife/Ml/MlPolicyAdvisor.cs` — blending эвристик и сети (epsilon‑greedy, warmup).
+- `BrainLife/Ml/IMlPolicyAdvisor.cs` — интерфейс советчика.
+- `BrainLife/Ml/MlPolicyAdvisor.cs` — реальная реализация (только при ML_CORE).
+- `BrainLife/Ml/MlPolicyAdvisorStub.cs` — заглушка без ML.Core.
+- `BrainLife/Ml/MlCoreAvailability.cs` — флаг наличия ML.Core.
+- `BrainLife/Ml/MlPolicyAdvisorFactory.cs` — фабрика выбора реализации.
+
+### Подключение ML.Core (v0.8.1)
+Сборка без ML.Core:
+- не задавайте `ML_CORE_PATH`.
+- проект собирается, ML отключен.
+
+Сборка с ML.Core:
+- задайте MSBuild property `ML_CORE_PATH` на путь к `ML.Core.csproj`.
+- пример: `dotnet build DeepBrain.slnx -p:ML_CORE_PATH=C:\path\to\ML.Core\ML.Core.csproj`.
 
 ### src/DeepBrain.Host/BrainLife/AttentionEngine.cs
 Назначение: выбор фокуса внимания (threat/novelty/social/body/agency).

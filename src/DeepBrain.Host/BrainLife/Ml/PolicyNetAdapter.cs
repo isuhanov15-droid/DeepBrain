@@ -1,3 +1,4 @@
+#if ML_CORE
 using ML.Core;
 using ML.Core.Layers;
 using ML.Core.Optimizers;
@@ -28,7 +29,10 @@ public sealed class PolicyNetAdapter
     public double[] PredictQ(float[] state)
     {
         var input = ToDouble(state);
-        return _net.Forward(input, training: false);
+        var q = _net.Forward(input, training: false);
+        if (q.Any(v => double.IsNaN(v) || double.IsInfinity(v)))
+            return new double[_actionCount];
+        return q;
     }
 
     public float[] PredictProbs(float[] state)
@@ -52,6 +56,8 @@ public sealed class PolicyNetAdapter
         {
             var q = _net.Forward(ToDouble(t.State), training: true);
             var nextQ = _net.Forward(ToDouble(t.NextState), training: false);
+            if (q.Any(v => double.IsNaN(v) || double.IsInfinity(v)) || nextQ.Any(v => double.IsNaN(v) || double.IsInfinity(v)))
+                return double.NaN;
             var maxNext = nextQ.Length == 0 ? 0 : nextQ.Max();
             var target = t.Reward + (t.Done ? 0.0 : gamma * maxNext);
             var diff = q[t.Action] - target;
@@ -168,3 +174,4 @@ public sealed class PolicyNetAdapter
         return exps;
     }
 }
+#endif

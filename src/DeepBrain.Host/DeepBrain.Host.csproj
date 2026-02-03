@@ -2,7 +2,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DeepBrain.Shared\DeepBrain.Shared.csproj" />
-    <ProjectReference Include="..\..\..\..\..\..\Downloads\ML\ML\ML.Core\ML.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(ML_CORE_PATH)' != '' and Exists('$(ML_CORE_PATH)') ">
+    <ProjectReference Include="$(ML_CORE_PATH)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -16,6 +19,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(ML_CORE_PATH)' != '' and Exists('$(ML_CORE_PATH)') ">
+    <DefineConstants>$(DefineConstants);ML_CORE</DefineConstants>
   </PropertyGroup>
 
 </Project>
