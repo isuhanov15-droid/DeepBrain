@@ -2,6 +2,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DeepBrain.Shared\DeepBrain.Shared.csproj" />
+    <ProjectReference Include="..\..\..\..\..\..\Downloads\ML\ML\ML.Core\ML.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="brainconfig.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <PropertyGroup>

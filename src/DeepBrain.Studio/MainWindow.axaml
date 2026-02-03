@@ -53,6 +53,10 @@
 						<TextBlock Name="LifeSemanticText"/>
 						<TextBlock Name="LifeClimateText"/>
 						<TextBlock Name="LifePainSourceText"/>
+						<TextBlock Name="LifeConfigText"/>
+						<TextBlock Name="LifeAppraisalText"/>
+						<TextBlock Name="LifeStatsText"/>
+						<TextBlock Name="LifeMlText"/>
 						<TextBlock Name="LifeVoiceModeText"/>
 						<TextBlock Name="LifePersonalityText"/>
 						<TextBlock Name="LifeHabitsText"/>

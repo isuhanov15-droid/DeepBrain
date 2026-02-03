@@ -52,5 +52,22 @@
     "tenderSocialMin": 0.35,
     "tenderArousalMax": 0.35
   },
+  "ml": {
+    "enable": false,
+    "seed": 1337,
+    "learningRate": 0.0005,
+    "gamma": 0.98,
+    "bufferSize": 20000,
+    "trainEveryTicks": 10,
+    "batchSize": 256,
+    "trainStepsPerBatch": 1,
+    "netWeightMax": 0.6,
+    "netWeightWarmup": 5000,
+    "epsilonStart": 0.35,
+    "epsilonEnd": 0.05,
+    "epsilonDecay": 0.999,
+    "gradClip": 1.0,
+    "checkpointPath": "ML/Models/deepbrain-policy.json"
+  },
   "useMlAdvisor": false
 }

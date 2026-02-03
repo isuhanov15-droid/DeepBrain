@@ -1,11 +1,12 @@
 using System.Linq;
 using DeepBrain.Shared.Brain;
+using DeepBrain.Shared.BrainDtos.V6;
 
 namespace DeepBrain.Host.BrainLife;
 
 public sealed class ActionSelector
 {
-    private sealed record Candidate(ActionDto Action, double Score, string Reason);
+    public sealed record Candidate(ActionDto Action, double Score, string Reason);
 
     public (ActionDto action, string reason, string strategy) Choose(
         HomeostasisDto homeo,
@@ -26,7 +27,63 @@ public sealed class ActionSelector
         string? planStrategy,
         string attentionFocus,
         SemanticMemory semantic,
-        string semanticKey)
+        string semanticKey,
+        AppraisalDto appraisal,
+        ActionsConfig actionsConfig)
+    {
+        var (candidates, strategy) = BuildCandidates(
+            homeo,
+            instincts,
+            affect,
+            learning,
+            loop,
+            memory,
+            cooldowns,
+            tick,
+            habitAction,
+            habitStrength,
+            habitInfluence,
+            emitCooldownTicks,
+            allowVariety,
+            calmExploreBoost,
+            dominantDrive,
+            planStrategy,
+            attentionFocus,
+            semantic,
+            semanticKey,
+            appraisal,
+            actionsConfig
+        );
+
+        if (candidates.Count == 0)
+            candidates.Add(Make("internal", "rest_short", 0.1 + (1 - homeo.Energy), "cooldown_fallback", learning));
+
+        var best = PickBest(candidates);
+        return (best.Action, best.Reason, strategy);
+    }
+
+    public (List<Candidate> candidates, string strategy) BuildCandidates(
+        HomeostasisDto homeo,
+        InstinctsDto instincts,
+        AffectDto affect,
+        LearningEngine learning,
+        LoopDetector loop,
+        EpisodeMemory memory,
+        ActionCooldowns cooldowns,
+        long tick,
+        string? habitAction,
+        double habitStrength,
+        double habitInfluence,
+        int emitCooldownTicks,
+        bool allowVariety,
+        bool calmExploreBoost,
+        string dominantDrive,
+        string? planStrategy,
+        string attentionFocus,
+        SemanticMemory semantic,
+        string semanticKey,
+        AppraisalDto appraisal,
+        ActionsConfig actionsConfig)
     {
         var list = new List<Candidate>();
 
@@ -63,19 +120,11 @@ public sealed class ActionSelector
         ApplyMemoryBias(list, memory, homeo, affect);
         ApplyAttentionBias(list, attentionFocus);
         ApplySemanticBias(list, semantic, semanticKey);
+        ApplyAppraisalBias(list, appraisal);
         ApplyHabitBias(list, habitAction, habitStrength, habitInfluence, cooldowns, tick, emitCooldownTicks);
         ApplyVarietyBonus(list, cooldowns, tick, allowVariety);
-        ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks);
-
-        if (list.Count == 0)
-            list.Add(Make("internal", "rest_short", 0.1 + (1 - homeo.Energy), "cooldown_fallback", learning));
-
-        var best = list
-            .OrderByDescending(c => c.Score)
-            .ThenBy(c => c.Action.Name, StringComparer.Ordinal)
-            .First();
-
-        return (best.Action, best.Reason, strategy);
+        ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks, actionsConfig);
+        return (list, strategy);
     }
 
     private static Candidate Make(string kind, string name, double baseScore, string reason, LearningEngine learning)
@@ -185,6 +234,31 @@ public sealed class ActionSelector
         }
     }
 
+    private static void ApplyAppraisalBias(List<Candidate> list, AppraisalDto appraisal)
+    {
+        if (appraisal.Threat > 0.6)
+            Boost(list, new[] { "breathe_slow", "focus_narrow" }, 0.2);
+        if (appraisal.Novelty > 0.6)
+            Boost(list, new[] { "explore_signal", "focus_widen" }, 0.15);
+        if (appraisal.Social > 0.6)
+            Boost(list, new[] { "emit_message" }, 0.15);
+        if (appraisal.Fatigue > 0.6)
+            Boost(list, new[] { "rest_short" }, 0.2);
+    }
+
+    private static void Boost(List<Candidate> list, IEnumerable<string> names, double bonus)
+    {
+        foreach (var name in names)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                if (c.Action.Name != name) continue;
+                list[i] = c with { Score = c.Score + bonus };
+            }
+        }
+    }
+
     private static void ApplyHabitBias(
         List<Candidate> list,
         string? habitAction,
@@ -222,26 +296,35 @@ public sealed class ActionSelector
         }
     }
 
-    private static void ApplyCooldowns(List<Candidate> list, ActionCooldowns cooldowns, long tick, int emitCooldownTicks)
+    private static void ApplyCooldowns(List<Candidate> list, ActionCooldowns cooldowns, long tick, int emitCooldownTicks, ActionsConfig actions)
     {
-        var filtered = list.Where(c => !IsOnCooldown(cooldowns, c.Action.Name, tick, emitCooldownTicks)).ToList();
+        var filtered = list.Where(c => !IsOnCooldown(cooldowns, c.Action.Name, tick, emitCooldownTicks, actions)).ToList();
         list.Clear();
         list.AddRange(filtered);
     }
 
-    private static bool IsOnCooldown(ActionCooldowns cooldowns, string actionName, long tick, int emitCooldownTicks)
+    private static bool IsOnCooldown(ActionCooldowns cooldowns, string actionName, long tick, int emitCooldownTicks, ActionsConfig actions)
     {
         var cd = actionName switch
         {
-            "breathe_slow" => 3,
-            "rest_short" => 5,
-            "reframe_negative" => 3,
-            "focus_narrow" => 2,
-            "focus_widen" => 2,
+            "breathe_slow" => actions.BreatheSlow,
+            "rest_short" => actions.RestShort,
+            "reframe_negative" => actions.ReframeNegative,
+            "focus_narrow" => actions.FocusNarrow,
+            "focus_widen" => actions.FocusWiden,
+            "explore_signal" => actions.ExploreSignal,
             "emit_message" => emitCooldownTicks,
             _ => 0
         };
 
         return cd > 0 && cooldowns.IsOnCooldown(actionName, tick, cd);
+    }
+
+    public static Candidate PickBest(IReadOnlyList<Candidate> list)
+    {
+        return list
+            .OrderByDescending(c => c.Score)
+            .ThenBy(c => c.Action.Name, StringComparer.Ordinal)
+            .First();
     }
 }

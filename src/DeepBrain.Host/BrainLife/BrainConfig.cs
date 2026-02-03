@@ -6,6 +6,7 @@ public sealed record BrainConfig(
     DrivesConfig Drives,
     ActionsConfig Actions,
     MoodConfig Mood,
+    MlConfig Ml,
     bool UseMlAdvisor = false)
 {
     public static BrainConfig Default => new(
@@ -61,6 +62,23 @@ public sealed record BrainConfig(
             CuriousArousalMax: 0.45,
             TenderSocialMin: 0.35,
             TenderArousalMax: 0.35
+        ),
+        new MlConfig(
+            Enable: false,
+            Seed: 1337,
+            LearningRate: 0.0005,
+            Gamma: 0.98,
+            BufferSize: 20000,
+            TrainEveryTicks: 10,
+            BatchSize: 256,
+            TrainStepsPerBatch: 1,
+            NetWeightMax: 0.6,
+            NetWeightWarmup: 5000,
+            EpsilonStart: 0.35,
+            EpsilonEnd: 0.05,
+            EpsilonDecay: 0.999,
+            GradClip: 1.0,
+            CheckpointPath: "ML/Models/deepbrain-policy.json"
         )
     );
 }
@@ -121,4 +139,22 @@ public sealed record MoodConfig(
     double CuriousArousalMax,
     double TenderSocialMin,
     double TenderArousalMax
+);
+
+public sealed record MlConfig(
+    bool Enable,
+    int Seed,
+    double LearningRate,
+    double Gamma,
+    int BufferSize,
+    int TrainEveryTicks,
+    int BatchSize,
+    int TrainStepsPerBatch,
+    double NetWeightMax,
+    double NetWeightWarmup,
+    double EpsilonStart,
+    double EpsilonEnd,
+    double EpsilonDecay,
+    double GradClip,
+    string CheckpointPath
 );

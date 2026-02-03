@@ -12,11 +12,14 @@ public sealed class WorldSim
     public double SocialPresence { get; private set; } = 0.4;
     public double Threat { get; private set; } = 0.1;
     public double Tension { get; private set; } = 0.25;
-    public double BaselineTension { get; } = 0.25;
-    public double DriftRatePerSec { get; } = 0.02;
-    public double ShockChanceBase { get; } = 0.01;
-    public double BaselineThreat { get; } = 0.10;
-    public double ThreatReturnRatePerSec { get; } = 0.06;
+    public double BaselineTension { get; private set; } = 0.25;
+    public double DriftRatePerSec { get; private set; } = 0.02;
+    public double ShockChanceBase { get; private set; } = 0.01;
+    public double MicroThreatChanceBase { get; private set; } = 0.03;
+    public double NoveltyChanceBase { get; private set; } = 0.02;
+    public double CalmWindowChanceBase { get; private set; } = 0.02;
+    public double BaselineThreat { get; private set; } = 0.10;
+    public double ThreatReturnRatePerSec { get; private set; } = 0.06;
 
     public WorldEventsQueue Events => _events;
     public string LastMajorEvent => _lastMajorEvent;
@@ -28,8 +31,9 @@ public sealed class WorldSim
         _rng = new Random(seed);
     }
 
-    public IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> Tick(long tick, string phase, double sleepPressure, bool isSleeping, double dtSeconds, double attachmentLevel)
+    public IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> Tick(long tick, string phase, double sleepPressure, bool isSleeping, double dtSeconds, double attachmentLevel, WorldConfig config)
     {
+        ApplyConfig(config);
         _events.Tick(dtSeconds);
 
         UpdateClimate(dtSeconds);
@@ -57,10 +61,10 @@ public sealed class WorldSim
         if (tick % 200 == 0)
             Novelty = LifeMath.Clamp01(Novelty + 0.1);
 
-        if (_rng.NextDouble() < (0.03 + StressLevel * 0.05))
+        if (_rng.NextDouble() < (MicroThreatChanceBase + StressLevel * 0.05))
             newEvents.Add(MakeEvent(tick, "micro_threat", 0.25 + _rng.NextDouble() * 0.15, "minor risk"));
 
-        var noveltyChance = 0.02 + Math.Max(0, CalmLevel - 0.6) * 0.06;
+        var noveltyChance = NoveltyChanceBase + Math.Max(0, CalmLevel - 0.6) * 0.06;
         if (_rng.NextDouble() < noveltyChance)
             newEvents.Add(MakeEvent(tick, "novelty_opportunity", 0.4 + _rng.NextDouble() * 0.2, "new pattern"));
 
@@ -70,7 +74,7 @@ public sealed class WorldSim
         if (phase == "active" && sleepPressure > 0.5 && _rng.NextDouble() < (0.02 + StressLevel * 0.03))
             newEvents.Add(MakeEvent(tick, "fatigue_wave", 0.45 + _rng.NextDouble() * 0.2, "energy dip"));
 
-        if (CalmLevel > 0.6 && _rng.NextDouble() < (0.02 + CalmLevel * 0.03))
+        if (CalmLevel > 0.6 && _rng.NextDouble() < (CalmWindowChanceBase + CalmLevel * 0.03))
             newEvents.Add(MakeEvent(tick, "calm_window", 0.3 + _rng.NextDouble() * 0.2, "safe window"));
 
         foreach (var ev in newEvents)
@@ -134,5 +138,17 @@ public sealed class WorldSim
     {
         var tensionDrift = DriftRatePerSec * dtSeconds * (BaselineTension - Tension);
         Tension = LifeMath.Clamp01(Tension + tensionDrift + RandDelta(0.01));
+    }
+
+    private void ApplyConfig(WorldConfig config)
+    {
+        BaselineThreat = config.BaselineThreat;
+        ThreatReturnRatePerSec = config.ThreatReturnRatePerSec;
+        ShockChanceBase = config.ShockChanceBase;
+        MicroThreatChanceBase = config.MicroThreatChanceBase;
+        NoveltyChanceBase = config.NoveltyChanceBase;
+        CalmWindowChanceBase = config.CalmWindowChanceBase;
+        DriftRatePerSec = config.DriftRatePerSec;
+        BaselineTension = config.BaselineTension;
     }
 }

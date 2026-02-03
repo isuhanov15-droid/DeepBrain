@@ -46,6 +46,8 @@ var traceEnabled = 0;
 var consoleLock = new object();
 var logBuffer = new List<string>(500);
 var ui = new ConsoleUiState();
+var configPath = Path.Combine(AppContext.BaseDirectory, "brainconfig.json");
+var configLoader = new BrainConfigLoader(configPath, msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 lifeLoop = new LifeLoop(
     new WorldSim(seed: 1337),
     new HomeostasisEngine(),
@@ -55,6 +57,7 @@ lifeLoop = new LifeLoop(
     new Actuator(),
     new RewardEngine(),
     new LearningEngine(),
+    configLoader,
     (state, ct) => server.BroadcastLifeStateAsync(state, ct).GetAwaiter().GetResult(),
     (trace, ct) =>
     {
@@ -88,7 +91,7 @@ try
     var brainTask = useLifeLoop && lifeLoop is not null
         ? lifeLoop.RunAsync(cts.Token)
         : RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
-    _ = Task.Run(() => RunCommandLoop(cts, brain, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
+    _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
 
     await Task.WhenAll(heartbeatTask, brainTask);
 }
@@ -177,6 +180,7 @@ static async Task RunBrainLoopAsync(
 static void RunCommandLoop(
     CancellationTokenSource cts,
     BrainEngine brain,
+    LifeLoop? lifeLoop,
     Func<bool> traceOn,
     Action<int> setTrace,
     ConsoleUiState ui,
@@ -184,7 +188,7 @@ static void RunCommandLoop(
     List<string> logBuffer,
     FileBatchWriter logWriter)
 {
-    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, death, exit");
+    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
@@ -219,6 +223,9 @@ static void RunCommandLoop(
                 break;
             case "logs":
                 DumpLogs(consoleLockProvider(), logBuffer);
+                break;
+            case "resetml":
+                lifeLoop?.ResetMl();
                 break;
             case "death":
                 brain.Stop();

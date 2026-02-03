@@ -1,7 +1,10 @@
 ﻿using System.Linq;
 using System.Linq;
+using DeepBrain.Host.BrainLife.Ml;
 using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.BrainDtos.V4;
+using DeepBrain.Shared.BrainDtos.V5;
+using DeepBrain.Shared.BrainDtos.V6;
 using DeepBrain.Shared.Trace;
 
 namespace DeepBrain.Host.BrainLife;
@@ -20,6 +23,7 @@ public sealed class LifeLoop
     private readonly Action<TraceDto, CancellationToken> _trace;
     private readonly Action<LifeOutputDto, CancellationToken> _output;
     private readonly Action<string> _log;
+    private readonly BrainConfigLoader _configLoader;
     private readonly EpisodeMemory _memory = new();
     private readonly LoopDetector _loop = new();
     private readonly MoodInertiaEngine _inertia = new();
@@ -39,6 +43,8 @@ public sealed class LifeLoop
     private readonly HabitSystem _habits = new();
     private readonly MessageDedupeGuard _dedupe = new();
     private readonly CalmBaselineEngine _calmBaseline = new();
+    private readonly AppraisalEngine _appraisal = new();
+    private readonly MlPolicyAdvisor _ml;
     private readonly Dictionary<string, int> _actionCounts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _eventCounts = new(StringComparer.Ordinal);
     private int _anxiousCount;
@@ -50,6 +56,8 @@ public sealed class LifeLoop
     private double _sumPain;
     private double _sumSafety;
     private double _sumArousal;
+    private double _sumReward;
+    private double _avgReward200;
     private double _sumThreat;
     private double _sumCalm;
     private double _sumStress;
@@ -58,6 +66,10 @@ public sealed class LifeLoop
     private readonly List<double> _painSamples = new(256);
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
+    private LifeStatsDto _statsSnapshot = new(0, 0, 0, 0);
+    private string _configVersion = "default";
+    private MlPolicyDto? _mlTelemetry;
+    private bool _mlLoaded;
 
     private HomeostasisDto _homeo = new(0.7, 0.2, 0.3, 0.1, 0.7);
     private AffectDto _affect = new("calm", 0.2, 0.3);
@@ -80,6 +92,7 @@ public sealed class LifeLoop
         Actuator actuator,
         RewardEngine reward,
         LearningEngine learning,
+        BrainConfigLoader configLoader,
         Action<LifeStateDto, CancellationToken> broadcast,
         Action<TraceDto, CancellationToken> trace,
         Action<LifeOutputDto, CancellationToken> output,
@@ -93,15 +106,26 @@ public sealed class LifeLoop
         _actuator = actuator;
         _reward = reward;
         _learning = learning;
+        _configLoader = configLoader;
         _broadcast = broadcast;
         _trace = trace;
         _output = output;
         _log = log;
+        var (cfg, _) = _configLoader.GetCurrent();
+        _ml = new MlPolicyAdvisor(cfg.Ml);
     }
 
     public void Start() => _running = true;
     public void Stop() => _running = false;
     public void Step() => _stepRequested = true;
+    public void ResetMl()
+    {
+        var (cfg, _) = _configLoader.GetCurrent();
+        var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
+        _ml.Reset(mlCfg);
+        _mlLoaded = true;
+        _log("ML reset");
+    }
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -128,6 +152,17 @@ public sealed class LifeLoop
     {
         var beforeHomeo = _homeo;
         var beforeAffect = _affect;
+        var (config, version) = _configLoader.GetCurrent();
+        _configVersion = version;
+        var mlConfig = config.Ml with { Enable = config.Ml.Enable || config.UseMlAdvisor };
+        if (mlConfig.Enable && !_mlLoaded)
+        {
+            if (_ml.TryLoad(mlConfig.CheckpointPath))
+                _log($"ML policy loaded: {mlConfig.CheckpointPath}");
+            _mlLoaded = true;
+        }
+        if (mlConfig.Enable && _tick > 0 && _tick % 500 == 0)
+            _ml.TrySave(mlConfig.CheckpointPath);
 
         _clock.Tick(dtSeconds, _sleep.IsSleeping);
         _sleep.Update(_clock, ref _homeo, ref _affect);
@@ -161,7 +196,7 @@ public sealed class LifeLoop
                 _tick,
                 DateTimeOffset.Now,
                 _homeo,
-                _instincts.Compute(_homeo, _world),
+                _instincts.Compute(_homeo, _world, config.Drives),
                 _affect,
                 "sleep",
                 0,
@@ -185,7 +220,11 @@ public sealed class LifeLoop
                     _world.Events.ConsumedCount
                 ),
                 new DeepBrain.Shared.BrainDtos.V5.ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
-                new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, 0)
+                new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, 0),
+                _configVersion,
+                null,
+                _statsSnapshot,
+                _ml.BuildTelemetry(mlConfig.Enable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200)
             );
             _broadcast(stateSleep, ct);
             _tick++;
@@ -193,8 +232,8 @@ public sealed class LifeLoop
         }
 
         var circ = _clock.Snapshot(false);
-        var preInstincts = _instincts.Compute(_homeo, _world);
-        var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping, dtSeconds, preInstincts.Attachment);
+        var preInstincts = _instincts.Compute(_homeo, _world, config.Drives);
+        var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping, dtSeconds, preInstincts.Attachment, config.World);
         foreach (var ev in newEvents)
             _log($"EVENT: {ev.Type} {ev.Severity:0.00} {ev.Payload}");
         foreach (var ev in newEvents)
@@ -204,16 +243,17 @@ public sealed class LifeLoop
             EmitTrace("world.climate", new { calm = _world.CalmLevel, stress = _world.StressLevel, tension = _world.Tension, baseline = _world.BaselineTension, lastMajor = _world.LastMajorEvent }, ct);
 
         _homeo = _homeostasis.Update(_homeo, _world, dtSeconds);
-        var painSource = ApplyPainSafetyAdjustments(ref _homeo, circ, recentEvents, dtSeconds);
-        var instincts = _instincts.Compute(_homeo, _world);
+        var painSource = ApplyPainSafetyAdjustments(ref _homeo, circ, recentEvents, dtSeconds, config.Pain);
+        var instincts = _instincts.Compute(_homeo, _world, config.Drives);
         instincts = instincts with
         {
             Agency = LifeMath.Clamp01(instincts.Agency - _agencyOffset)
         };
 
+        var appraisal = _appraisal.Compute(_homeo, instincts, _world, circ, recentEvents);
         var computedAttention = _attention.Compute(_homeo, instincts, _affect, circ, recentEvents, _world.Tension, dtSeconds);
         var attention = _attentionInertia.Apply(computedAttention);
-        var computedAffect = _emotion.Compute(instincts, _homeo, _world.CalmLevel, _world.StressLevel, attention, recentEvents);
+        var computedAffect = _emotion.Compute(instincts, _homeo, _world.CalmLevel, _world.StressLevel, attention, recentEvents, config.Mood, appraisal);
         var (inertAffect, moodInertia) = _inertia.Apply(_affect, computedAffect, instincts.SelfPreservation);
         _affect = inertAffect;
         _personality.ApplyBaselines(ref _affect, ref instincts);
@@ -244,11 +284,11 @@ public sealed class LifeLoop
             habitInfluence *= 0.7;
         var voiceMode = _voice.Resolve(_personality.Persona, _affect, instincts, circ);
         var isAnxious = _affect.Mood == "anxious" || instincts.SelfPreservation > 0.8;
-        var emitCooldown = ComputeEmitCooldownTicks(voiceMode, _personality.Persona.AttachmentBaseline, isAnxious);
+        var emitCooldown = ComputeEmitCooldownTicks(voiceMode, _personality.Persona.AttachmentBaseline, isAnxious, config.Actions);
         var allowVariety = _world.Threat < 0.35 && attention.Focus1 != "threat";
         var calmExploreBoost = _world.CalmLevel > 0.6 && _homeo.Energy > 0.5 && _homeo.Pain < 0.4;
 
-        var (action, reason, strategy) = _selector.Choose(
+        var (candidates, strategy) = _selector.BuildCandidates(
             _homeo,
             instincts,
             _affect,
@@ -267,8 +307,45 @@ public sealed class LifeLoop
             activePlan?.Strategy,
             attention.Focus1,
             _semantic,
-            semanticKey
+            semanticKey,
+            appraisal,
+            config.Actions
         );
+
+        if (candidates.Count == 0)
+            candidates.Add(new ActionSelector.Candidate(new ActionDto("internal", "rest_short", 0.2, null), 0.1 + (1 - _homeo.Energy), "cooldown_fallback"));
+
+        var allowedActions = candidates.Select(c => c.Action.Name).Distinct().ToList();
+        var heuristicScores = ActionCatalog.Actions.ToDictionary(a => a, _ => double.NegativeInfinity, StringComparer.Ordinal);
+        foreach (var c in candidates)
+        {
+            if (heuristicScores.TryGetValue(c.Action.Name, out var current))
+                heuristicScores[c.Action.Name] = Math.Max(current, c.Score);
+        }
+
+        var stateVec = mlConfig.Enable
+            ? _ml.Encode(new StateVectorInput(
+                _homeo,
+                instincts,
+                _affect,
+                moodInertia,
+                circ,
+                new ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
+                attention,
+                _loop.LoopPenalty,
+                _loop.AvgRewardShort,
+                _personality.Persona,
+                habitInfluence,
+                recentEvents.FirstOrDefault()?.Salience ?? 0,
+                appraisal
+            ))
+            : Array.Empty<float>();
+
+        var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, mlConfig, _tick);
+        var chosen = candidates.FirstOrDefault(c => c.Action.Name == decision.ActionName) ?? ActionSelector.PickBest(candidates);
+        var action = chosen.Action;
+        var reason = decision.PolicySource == "heuristic" ? chosen.Reason : $"{chosen.Reason}|{decision.PolicySource}";
+
         EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason }, ct);
 
         var outcome = _actuator.Apply(action, ref _homeo, ref _affect);
@@ -283,9 +360,32 @@ public sealed class LifeLoop
 
         var reward = _reward.Compute(beforeHomeo, _homeo);
         reward += ComputeRegulationBonus(action, beforeHomeo, _homeo, beforeAffect, _affect);
+        if (mlConfig.Enable && stateVec.Length > 0)
+        {
+            var nextInstincts = _instincts.Compute(_homeo, _world, config.Drives);
+            var nextAppraisal = _appraisal.Compute(_homeo, nextInstincts, _world, circ, recentEvents);
+            var nextVec = _ml.Encode(new StateVectorInput(
+                _homeo,
+                nextInstincts,
+                _affect,
+                moodInertia,
+                circ,
+                new ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
+                attention,
+                _loop.LoopPenalty,
+                _loop.AvgRewardShort,
+                _personality.Persona,
+                habitInfluence,
+                recentEvents.FirstOrDefault()?.Salience ?? 0,
+                nextAppraisal
+            ));
+            var actionIdx = ActionCatalog.IndexOf(action.Name);
+            _ml.Observe(stateVec, actionIdx, (float)reward, nextVec, mlConfig, _tick);
+        }
         _learning.Update(action.Name, reward);
         _loop.Update(action.Name, reward);
         _cooldowns.Mark(action.Name, _tick);
+        UpdateStats(action.Name, _affect.Mood, _homeo, attention, reward);
 
         outcome = new OutcomeDto(outcome.Action, reward, outcome.Message);
 
@@ -351,6 +451,9 @@ public sealed class LifeLoop
             _loop.AvgRewardShort
         );
 
+        var mlTelemetry = _ml.BuildTelemetry(mlConfig.Enable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200);
+        _mlTelemetry = mlTelemetry;
+
         var emitRemaining = Math.Max(0, emitCooldown - (int)(_tick - _cooldowns.GetLastTick("emit_message")));
         var state = new LifeStateDto(
             _tick,
@@ -380,7 +483,11 @@ public sealed class LifeLoop
                 _world.Events.ConsumedCount
             ),
             new DeepBrain.Shared.BrainDtos.V5.ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
-            painSource
+            painSource,
+            _configVersion,
+            appraisal,
+            _statsSnapshot,
+            mlTelemetry
         );
 
         var episode = new EpisodeDto(
@@ -444,7 +551,6 @@ public sealed class LifeLoop
         if (habitUpdated is not null)
             _log($"HABIT_LEARN: {cueKey} -> {habitUpdated.Id} strength={habitUpdated.Strength:0.00} avgReward={habitUpdated.AvgReward:0.000}");
 
-        UpdateStats(action.Name, _affect.Mood, _homeo, attention);
         if (_tick > 0 && _tick % 200 == 0)
             EmitStats();
 
@@ -485,24 +591,25 @@ public sealed class LifeLoop
         ref HomeostasisDto homeo,
         DeepBrain.Shared.BrainDtos.V3.CircadianDto circ,
         IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> eventsList,
-        double dtSeconds)
+        double dtSeconds,
+        PainConfig config)
     {
         var threatEvents = eventsList.Where(e => (e.Type == "threat_spike" || e.Type == "micro_threat") && e.Salience > 0.3).ToList();
         var calmEvent = eventsList.Any(e => e.Type == "calm_window" && e.Salience > 0.3);
 
-        var threatComponent = _world.Threat * 0.020 + threatEvents.Sum(e => e.Severity) * 0.015;
-        var fatigueComponent = Math.Max(0, homeo.Fatigue - 0.6) * 0.030;
-        var sleepComponent = Math.Max(0, circ.SleepPressure - 0.7) * 0.030;
+        var threatComponent = _world.Threat * config.ThreatK + threatEvents.Sum(e => e.Severity) * config.ThreatK;
+        var fatigueComponent = Math.Max(0, homeo.Fatigue - 0.6) * config.FatigueK;
+        var sleepComponent = Math.Max(0, circ.SleepPressure - 0.7) * config.SleepK;
 
-        var baselinePain = 0.12;
-        var painReturnRatePerSec = 0.08;
-        var decay = 0.04 * dtSeconds;
+        var baselinePain = config.BaselinePain;
+        var painReturnRatePerSec = config.PainReturnRatePerSec;
+        var decay = config.DecayPerSec * dtSeconds;
         var pain = homeo.Pain + dtSeconds * (threatComponent + fatigueComponent + sleepComponent) - decay;
         pain -= (homeo.Pain - baselinePain) * painReturnRatePerSec * dtSeconds;
         if (calmEvent)
-            pain -= 0.03 * dtSeconds;
+            pain -= config.CalmBonusPerSec * dtSeconds;
         if (homeo.Safety > 0.8)
-            pain -= 0.02 * dtSeconds;
+            pain -= config.SafetyBonusPerSec * dtSeconds;
 
         var safety = homeo.Safety;
         if (calmEvent)
@@ -521,7 +628,7 @@ public sealed class LifeLoop
             return new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, 0);
 
         var posTotal = threatComponent + fatigueComponent + sleepComponent;
-        var recovery = Math.Max(0, decay + (calmEvent ? 0.03 * dtSeconds : 0) + (homeo.Safety > 0.8 ? 0.02 * dtSeconds : 0));
+        var recovery = Math.Max(0, decay + (calmEvent ? config.CalmBonusPerSec * dtSeconds : 0) + (homeo.Safety > 0.8 ? config.SafetyBonusPerSec * dtSeconds : 0));
         if (posTotal <= 0)
             return new DeepBrain.Shared.BrainDtos.V5.PainSourceDto(0, 0, 0, recovery > 0 ? 1 : 0);
 
@@ -545,20 +652,20 @@ public sealed class LifeLoop
         return message;
     }
 
-    private static int ComputeEmitCooldownTicks(string voiceMode, double attachmentBaseline, bool isAnxious)
+    private static int ComputeEmitCooldownTicks(string voiceMode, double attachmentBaseline, bool isAnxious, ActionsConfig actions)
     {
         var baseCooldown = voiceMode switch
         {
-            "tender" => 60,
-            "fiery" => 75,
-            "witty" => 65,
-            _ => 60
+            "tender" => actions.EmitCooldownTender,
+            "fiery" => actions.EmitCooldownFiery,
+            "witty" => actions.EmitCooldownWitty,
+            _ => actions.EmitCooldownCalm
         };
 
         var adjust = (0.5 - attachmentBaseline) * 40.0;
         var anxiousBoost = isAnxious ? 20 : 0;
         var value = (int)Math.Round(baseCooldown + adjust + anxiousBoost);
-        return Math.Clamp(value, 60, 120);
+        return Math.Clamp(value, actions.EmitMessage, 160);
     }
 
     private void AppendEpisode(EpisodeDto episode)
@@ -568,7 +675,7 @@ public sealed class LifeLoop
         _episodes.Add(episode);
     }
 
-    private void UpdateStats(string actionName, string mood, HomeostasisDto homeo, AttentionDto attention)
+    private void UpdateStats(string actionName, string mood, HomeostasisDto homeo, AttentionDto attention, double reward)
     {
         _statsTicks++;
         if (mood == "anxious") _anxiousCount++;
@@ -580,6 +687,7 @@ public sealed class LifeLoop
         _sumPain += homeo.Pain;
         _sumSafety += homeo.Safety;
         _sumArousal += homeo.Arousal;
+        _sumReward += reward;
         _sumThreat += _world.Threat;
         _sumCalm += _world.CalmLevel;
         _sumStress += _world.StressLevel;
@@ -588,6 +696,18 @@ public sealed class LifeLoop
         _painSamples.Add(homeo.Pain);
 
         _actionCounts[actionName] = _actionCounts.TryGetValue(actionName, out var count) ? count + 1 : 1;
+        _avgReward200 = _statsTicks > 0 ? _sumReward / _statsTicks : 0;
+        _statsSnapshot = BuildStatsSnapshot();
+    }
+
+    private LifeStatsDto BuildStatsSnapshot()
+    {
+        if (_statsTicks == 0) return _statsSnapshot;
+        var anxiousPct = _anxiousCount / (double)_statsTicks;
+        var calmPct = _calmCount / (double)_statsTicks;
+        var curiousPct = _curiousCount / (double)_statsTicks;
+        var p95Pain = ComputeP95(_painSamples);
+        return new LifeStatsDto(anxiousPct, calmPct, curiousPct, p95Pain);
     }
 
     private void EmitStats()
@@ -624,6 +744,10 @@ public sealed class LifeLoop
         _log($"STATS climate: avgThreat={avgThreat:0.00} avgCalm={avgCalm:0.00} avgStress={avgStress:0.00} avgThreatFocus={avgThreatFocus:0.00} painClamped={_painClampedCount}");
         _log($"STATS actions: {string.Join(", ", topActions)}");
         _log($"STATS events: threat_spike={threatCount} micro_threat={microCount} calm_window={calmCount} novelty={novCount} social_ping={socialCount}");
+        if (_mlTelemetry is not null)
+        {
+            _log($"STATS_ML(200): avgR={_mlTelemetry.AvgReward200:0.000} entropy={_mlTelemetry.Entropy:0.000} eps={_mlTelemetry.Epsilon:0.000} w={_mlTelemetry.NetWeight:0.00} loss={_mlTelemetry.LastLoss:0.000} buf={_mlTelemetry.BufferSize} source={_mlTelemetry.PolicySource}");
+        }
 
         _anxiousCount = 0;
         _calmCount = 0;
@@ -634,6 +758,7 @@ public sealed class LifeLoop
         _sumPain = 0;
         _sumSafety = 0;
         _sumArousal = 0;
+        _sumReward = 0;
         _sumThreat = 0;
         _sumCalm = 0;
         _sumStress = 0;
@@ -642,6 +767,8 @@ public sealed class LifeLoop
         _painSamples.Clear();
         _actionCounts.Clear();
         _eventCounts.Clear();
+        _statsSnapshot = new LifeStatsDto(0, 0, 0, 0);
+        _avgReward200 = 0;
     }
 
     private static double ComputeP95(List<double> samples)

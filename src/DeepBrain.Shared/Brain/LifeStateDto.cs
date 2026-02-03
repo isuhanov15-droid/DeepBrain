@@ -4,6 +4,7 @@ using DeepBrain.Shared.BrainDtos.V2;
 using DeepBrain.Shared.BrainDtos.V3;
 using DeepBrain.Shared.BrainDtos.V4;
 using DeepBrain.Shared.BrainDtos.V5;
+using DeepBrain.Shared.BrainDtos.V6;
 
 public sealed record LifeStateDto(
     long Tick,
@@ -24,5 +25,9 @@ public sealed record LifeStateDto(
     IReadOnlyList<SemanticNoteDto>? SemanticNotesTop = null,
     CharacterStateDto? Character = null,
     ClimateDto? Climate = null,
-    PainSourceDto? PainSource = null
+    PainSourceDto? PainSource = null,
+    string? ConfigVersion = null,
+    AppraisalDto? Appraisal = null,
+    LifeStatsDto? Stats = null,
+    MlPolicyDto? Ml = null
 );

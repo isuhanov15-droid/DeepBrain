@@ -2,7 +2,7 @@
 
 Дата: 2026-02-02
 
-Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.6: суточный цикл, сон, консолидация памяти, микро‑планы, внимание, события мира, семантическая память, self-talk, throttling/инерция/затухание/регуляция.
+Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.8: суточный цикл, сон, консолидация памяти, микро‑планы, внимание, события мира, семантическая память, self-talk, throttling/инерция/затухание/регуляция, а также ML‑policy advisor и горячий конфиг.
 
 ---
 
@@ -108,7 +108,9 @@ OutcomeDto (`OutcomeDto.cs`):
 LifeStateDto (`LifeStateDto.cs`):
 - `Tick`, `Ts`, `Homeostasis`, `Instincts`, `Affect`, `LastDecision`, `LastReward`,
 - расширения v0.3: `Policy`, `DominantDrive`, `MoodInertia`,
-- расширения v0.4: `Circadian`, `Goals`, `ActivePlan`.
+- расширения v0.4: `Circadian`, `Goals`, `ActivePlan`,
+- расширения v0.5–v0.7: `Attention`, `RecentEvents`, `SemanticNotesTop`, `Character`, `Climate`, `PainSource`,
+- расширения v0.8: `ConfigVersion`, `Appraisal`, `Stats`, `Ml`.
 
 EpisodeDto (`EpisodeDto.cs`):
 - `Tick`, `BeforeHomeostasis`, `AfterHomeostasis`, `Action`, `Reward`, `Ts`.
@@ -137,6 +139,16 @@ WorldEventDto (`src/DeepBrain.Shared/BrainDtos/V4/WorldEventDto.cs`):
 SemanticNoteDto (`src/DeepBrain.Shared/BrainDtos/V4/SemanticNoteDto.cs`):
 - `Key`, `BestAction`, `Score`, `Samples`.
 
+AppraisalDto (`src/DeepBrain.Shared/BrainDtos/V6/AppraisalDto.cs`):
+- `Threat`, `Novelty`, `Social`, `Fatigue` — нормированные оценки событий/состояния.
+
+LifeStatsDto (`src/DeepBrain.Shared/BrainDtos/V6/LifeStatsDto.cs`):
+- `AnxiousPct`, `CalmPct`, `CuriousPct`, `P95Pain` — агрегаты за окно 200 тиков.
+
+MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
+- `Enabled`, `InputDim`, `ActionCount`, `NetWeight`, `Epsilon`,
+  `BufferSize`, `LastLoss`, `TrainSteps`, `AvgReward200`, `Entropy`, `PolicySource`.
+
 ---
 
 ## 2) DeepBrain.Host (сервер и мозг)
@@ -149,7 +161,8 @@ SemanticNoteDto (`src/DeepBrain.Shared/BrainDtos/V4/SemanticNoteDto.cs`):
 - инициализация:
   - `InputStore`, `BrainEngine` (v0.1);
   - `FileBatchWriter` для логов и трасс (`Logs/` и `Trace/`);
-  - `LifeLoop` (v0.2/v0.3/v0.4/v0.5/v0.6), включен по умолчанию (`useLifeLoop = true`).
+ - `LifeLoop` (v0.2…v0.8), включен по умолчанию (`useLifeLoop = true`).
+ - `BrainConfigLoader` — горячая загрузка `brainconfig.json` (обновление раз в ~2 сек).
 - запуск TCP‑сервера `TcpBrainServer`.
 - heartbeat‑цикл (обновляет `Console.Title`, отправляет log heartbeat).
 - запуск одного из циклов:
@@ -159,6 +172,7 @@ SemanticNoteDto (`src/DeepBrain.Shared/BrainDtos/V4/SemanticNoteDto.cs`):
   - `trace` — вкл/выкл отображение trace в консоли;
   - `start/stop` — управляют v0.1;
   - `logs` — печатает лог‑буфер;
+  - `resetml` — сброс ML‑policy (буфер/сеть);
   - `death/exit` — завершение.
 
 RunBrainLoopAsync (v0.1):
@@ -370,6 +384,34 @@ v0.5:
 - генерирует события (threat_spike, novelty_opportunity, social_ping, fatigue_wave, calm_window);
 - пушит в `WorldEventsQueue` и влияет на Threat/Novelty/SocialPresence.
 
+### src/DeepBrain.Host/BrainLife/BrainConfig.cs
+Назначение: параметры поведения мозга из JSON.
+Содержит конфиги:
+- `WorldConfig`, `PainConfig`, `DrivesConfig`, `ActionsConfig`, `MoodConfig`, `MlConfig`.
+
+### src/DeepBrain.Host/BrainLife/BrainConfigLoader.cs
+Назначение: горячая загрузка `brainconfig.json`.
+Поведение:
+- проверка файла раз в ~2 сек;
+- кеш последней валидной версии;
+- версия = hash (8 hex).
+
+### src/DeepBrain.Host/brainconfig.json
+Назначение: дефолтные параметры мира/болезни/драйвов/действий/настроения/ML.
+
+### src/DeepBrain.Host/BrainLife/AppraisalEngine.cs
+Назначение: оценивает threat/novelty/social/fatigue из мира, событий и состояния.
+Используется в EmotionEngine и ActionSelector.
+
+### ML‑политика (v0.8)
+Файлы:
+- `BrainLife/Ml/ActionCatalog.cs` — единый список действий (string[] + index).
+- `BrainLife/Ml/StateVectorizer.cs` — стабилизированная векторизация состояния (фикс. длина).
+- `BrainLife/Ml/ExperienceBuffer.cs` — буфер переходов (FIFO).
+- `BrainLife/Ml/PolicyNetAdapter.cs` — MLP на ML.Core, предсказание Q/softmax.
+- `BrainLife/Ml/OnlineTrainer.cs` — онлайн‑обучение DQN‑lite.
+- `BrainLife/Ml/MlPolicyAdvisor.cs` — blending эвристик и сети (epsilon‑greedy, warmup).
+
 ### src/DeepBrain.Host/BrainLife/AttentionEngine.cs
 Назначение: выбор фокуса внимания (threat/novelty/social/body/agency).
 Входы: homeostasis/instincts/affect/circadian/recentEvents.
@@ -393,7 +435,7 @@ v0.5:
 Формула: энергия+безопасность − (fatigue+pain)*0.5.
 
 ### src/DeepBrain.Host/BrainLife/LifeLoop.cs
-Назначение: главный цикл v0.4/v0.5/v0.6.
+Назначение: главный цикл v0.4…v0.8.
 Шаги:
 1) `CircadianClock.Tick`.
 2) `SleepEngine.Update`.
@@ -404,10 +446,12 @@ v0.5:
 4) если бодрствование:
    - `GoalResolver.Resolve`.
    - `PlanEngine.Update`.
-   - `ActionSelector.Choose` (учет плана).
+   - `ActionSelector.BuildCandidates` + ML‑advisor blending.
    - `Actuator / Reward / Learning / Memory` как в v0.3.
-5) LifeState включает `Circadian`, `Goals`, `ActivePlan`.
-6) Диагностика каждые 50 тиков: phase/sleeping/drive/goals/plan/action/reward.
+5) LifeState включает `Circadian`, `Goals`, `ActivePlan`, `Appraisal`, `Stats`, `Ml`, `ConfigVersion`.
+6) Диагностика:
+   - каждые 50 тиков: phase/attention/plan/action/reward.
+   - каждые 200 тиков: `STATS(200)` и `STATS_ML(200)`.
 7) Логи: `ENTER SLEEP`, `WAKE UP`, `PLAN CREATED`, `PLAN INTERRUPTED`.
 
 ---
@@ -442,6 +486,8 @@ Connect: ping + подписки logs/state/trace/life/output.
 - phase/sleepPressure/isSleeping;
 - active plan (strategy/goal/ttl);
 - goals (id/urgency/satisfaction).
+Поля v0.8 (Life panel):
+- `configVersion`, `appraisal.*`, `stats(200)`, `ml.*` (epsilon, loss, buffer, entropy, source).
 
 ### src/DeepBrain.Studio/Net/TcpClientService.cs
 Назначение: TCP‑клиент.
@@ -462,8 +508,8 @@ Connect: ping + подписки logs/state/trace/life/output.
 ---
 
 ## Итог
-- Проект содержит два параллельных мозга: v0.1 (старый) и v0.4 (LifeLoop с временем/сном/планами).
-- Ветка v0.4 по умолчанию активна и вещает расширенную телеметрию.
+- Проект содержит два параллельных мозга: v0.1 (старый) и v0.4…v0.8 (LifeLoop).
+- LifeLoop по умолчанию активен и вещает расширенную телеметрию (включая ML‑метрики v0.8).
 - Studio — только наблюдение и вывод состояния, без управления мозгом.
 
 

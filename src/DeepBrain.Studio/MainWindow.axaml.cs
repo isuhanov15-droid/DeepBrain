@@ -213,6 +213,35 @@ public partial class MainWindow : Window
             LifePainSourceText.Text = "painSource=n/a";
         }
 
+        LifeConfigText.Text = $"config={state.ConfigVersion ?? "n/a"}";
+
+        if (state.Appraisal is not null)
+        {
+            LifeAppraisalText.Text = $"appraisal=threat:{state.Appraisal.Threat:0.00} novelty:{state.Appraisal.Novelty:0.00} social:{state.Appraisal.Social:0.00} fatigue:{state.Appraisal.Fatigue:0.00}";
+        }
+        else
+        {
+            LifeAppraisalText.Text = "appraisal=n/a";
+        }
+
+        if (state.Stats is not null)
+        {
+            LifeStatsText.Text = $"stats=anx:{state.Stats.AnxiousPct:0.00} calm:{state.Stats.CalmPct:0.00} cur:{state.Stats.CuriousPct:0.00} p95pain:{state.Stats.P95Pain:0.00}";
+        }
+        else
+        {
+            LifeStatsText.Text = "stats=n/a";
+        }
+
+        if (state.Ml is not null)
+        {
+            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} dim:{state.Ml.InputDim} act:{state.Ml.ActionCount} w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000} buf:{state.Ml.BufferSize} ent:{state.Ml.Entropy:0.00} src:{state.Ml.PolicySource}";
+        }
+        else
+        {
+            LifeMlText.Text = "ml=n/a";
+        }
+
         if (state.Character is not null)
         {
             var p = state.Character.Personality;
