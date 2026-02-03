@@ -22,5 +22,7 @@ public sealed record LifeStateDto(
     AttentionDto? Attention = null,
     IReadOnlyList<WorldEventDto>? RecentEvents = null,
     IReadOnlyList<SemanticNoteDto>? SemanticNotesTop = null,
-    CharacterStateDto? Character = null
+    CharacterStateDto? Character = null,
+    ClimateDto? Climate = null,
+    PainSourceDto? PainSource = null
 );

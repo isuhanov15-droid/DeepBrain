@@ -195,6 +195,24 @@ public partial class MainWindow : Window
             LifeSemanticText.Text = "semantic=n/a";
         }
 
+        if (state.Climate is not null)
+        {
+            LifeClimateText.Text = $"climate=calm:{state.Climate.CalmLevel:0.00} stress:{state.Climate.StressLevel:0.00}";
+        }
+        else
+        {
+            LifeClimateText.Text = "climate=n/a";
+        }
+
+        if (state.PainSource is not null)
+        {
+            LifePainSourceText.Text = $"painSource=threat:{state.PainSource.Threat:0.00} fatigue:{state.PainSource.Fatigue:0.00} sleep:{state.PainSource.Sleep:0.00}";
+        }
+        else
+        {
+            LifePainSourceText.Text = "painSource=n/a";
+        }
+
         if (state.Character is not null)
         {
             var p = state.Character.Personality;

@@ -20,6 +20,8 @@ public sealed class ActionSelector
         double habitStrength,
         double habitInfluence,
         int emitCooldownTicks,
+        bool allowVariety,
+        bool calmExploreBoost,
         string dominantDrive,
         string? planStrategy,
         string attentionFocus,
@@ -28,7 +30,7 @@ public sealed class ActionSelector
     {
         var list = new List<Candidate>();
 
-        var strategy = ResolveStrategy(instincts, affect, dominantDrive, loop, planStrategy);
+        var strategy = ResolveStrategy(instincts, affect, dominantDrive, loop, planStrategy, calmExploreBoost);
 
         if (IsAllowed(strategy, "regulate") || instincts.SelfPreservation > 0.6)
         {
@@ -62,6 +64,7 @@ public sealed class ActionSelector
         ApplyAttentionBias(list, attentionFocus);
         ApplySemanticBias(list, semantic, semanticKey);
         ApplyHabitBias(list, habitAction, habitStrength, habitInfluence, cooldowns, tick, emitCooldownTicks);
+        ApplyVarietyBonus(list, cooldowns, tick, allowVariety);
         ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks);
 
         if (list.Count == 0)
@@ -84,7 +87,7 @@ public sealed class ActionSelector
         return new Candidate(action, score, reason);
     }
 
-    private static string ResolveStrategy(InstinctsDto instincts, AffectDto affect, string dominantDrive, LoopDetector loop, string? planStrategy)
+    private static string ResolveStrategy(InstinctsDto instincts, AffectDto affect, string dominantDrive, LoopDetector loop, string? planStrategy, bool calmExploreBoost)
     {
         if (!string.IsNullOrWhiteSpace(planStrategy))
             return planStrategy!;
@@ -102,6 +105,9 @@ public sealed class ActionSelector
             return "explore";
         if (instincts.Agency > 0.6 && affect.Valence < 0)
             return "regulate";
+
+        if (calmExploreBoost)
+            return dominantDrive == "exploration" ? "explore" : "focus";
 
         return dominantDrive == "exploration" ? "explore" : "focus";
     }
@@ -199,6 +205,20 @@ public sealed class ActionSelector
             var bonus = 0.05 + habitStrength * 0.1;
             list[i] = c with { Score = c.Score + bonus * LifeMath.Clamp01(habitInfluence) };
             break;
+        }
+    }
+
+    private static void ApplyVarietyBonus(List<Candidate> list, ActionCooldowns cooldowns, long tick, bool allowVariety)
+    {
+        if (!allowVariety) return;
+        for (var i = 0; i < list.Count; i++)
+        {
+            var c = list[i];
+            var last = cooldowns.GetLastTick(c.Action.Name);
+            var gap = last < 0 ? 100 : tick - last;
+            if (gap < 10) continue;
+            var bonus = Math.Min(0.08, (gap / 15.0) * 0.05);
+            list[i] = c with { Score = c.Score + bonus };
         }
     }
 

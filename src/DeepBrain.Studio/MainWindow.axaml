@@ -51,6 +51,8 @@
 						<TextBlock Name="LifeAttentionText"/>
 						<TextBlock Name="LifeEventsText"/>
 						<TextBlock Name="LifeSemanticText"/>
+						<TextBlock Name="LifeClimateText"/>
+						<TextBlock Name="LifePainSourceText"/>
 						<TextBlock Name="LifeVoiceModeText"/>
 						<TextBlock Name="LifePersonalityText"/>
 						<TextBlock Name="LifeHabitsText"/>

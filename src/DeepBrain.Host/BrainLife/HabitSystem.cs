@@ -11,6 +11,7 @@ public sealed class HabitSystem
     private sealed record HabitState(string Id, string CueKey, string RoutineAction, double Strength, int Uses, double AvgReward);
 
     private readonly Dictionary<string, HabitState> _habits = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Queue<long>> _recentUses = new(StringComparer.Ordinal);
 
     public HabitSystem()
     {
@@ -40,14 +41,17 @@ public sealed class HabitSystem
         return (habit.RoutineAction, habit.Strength, habit.Id);
     }
 
-    public HabitDto? UpdateAfter(string actionName, double reward, string cueKey)
+    public HabitDto? UpdateAfter(string actionName, double reward, string cueKey, long tick)
     {
         if (cueKey == "none") return null;
         if (!_habits.TryGetValue(cueKey, out var habit)) return null;
 
         var strength = habit.Strength;
         if (string.Equals(actionName, habit.RoutineAction, StringComparison.Ordinal))
+        {
             strength = LifeMath.Clamp01(strength + (reward >= 0 ? 0.03 : -0.02));
+            RecordUse(habit.Id, tick);
+        }
         else if (reward < 0)
             strength = LifeMath.Clamp01(strength - 0.01);
 
@@ -72,6 +76,14 @@ public sealed class HabitSystem
         var baseInfluence = LifeMath.Clamp01(0.2 + habitStrength * 0.6);
         var disciplineFactor = LifeMath.Clamp01(1.0 - persona.DisciplineBaseline * 0.6);
         return LifeMath.Clamp01(baseInfluence * disciplineFactor);
+    }
+
+    public double GetSatiationFactor(string habitId, long tick)
+    {
+        if (!_recentUses.TryGetValue(habitId, out var queue)) return 1.0;
+        while (queue.Count > 0 && tick - queue.Peek() > 80)
+            queue.Dequeue();
+        return queue.Count > 5 ? 0.6 : 1.0;
     }
 
     public IEnumerable<(HabitDto before, HabitDto after)> ApplyDecay(long tick)
@@ -102,6 +114,16 @@ public sealed class HabitSystem
     private void Add(string id, string cueKey, string action, double strength)
     {
         _habits[cueKey] = new HabitState(id, cueKey, action, strength, 0, 0);
+    }
+
+    private void RecordUse(string habitId, long tick)
+    {
+        if (!_recentUses.TryGetValue(habitId, out var queue))
+        {
+            queue = new Queue<long>();
+            _recentUses[habitId] = queue;
+        }
+        queue.Enqueue(tick);
     }
 
     private static HabitDto ToDto(HabitState state)
