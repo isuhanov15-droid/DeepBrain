@@ -23,5 +23,6 @@ public sealed record MlPolicyDto(
     string BackendKind,
     bool RemoteConnected,
     double RttMs,
-    string? LastRemoteError
+    string? LastRemoteError,
+    string? ReasonIfDisabled
 );

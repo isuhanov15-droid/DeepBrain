@@ -87,6 +87,7 @@ public sealed class LifeLoop
     private readonly List<EpisodeDto> _episodes = new(512);
     private const int EpisodeCapacity = 512;
     private const int DiagnosticTicks = 200;
+    private const string MlCoreMissingReason = "ML.Core not linked: set ML_CORE_PATH to ML.Core.csproj";
 
     public LifeLoop(
         WorldSim world,
@@ -146,14 +147,33 @@ public sealed class LifeLoop
         var (cfg, _) = _configLoader.GetCurrent();
         var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
         var backendKind = (mlCfg.Backend ?? "off").Trim().ToLowerInvariant();
-        if (backendKind == "local" && !MlCoreAvailability.IsAvailable)
-            mlCfg = mlCfg with { Enable = false };
-        var t = _ml.BuildTelemetry(mlCfg.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200);
-        return $"ml.enable={mlCfg.Enable} backend={t.BackendKind} core={(MlCoreAvailability.IsAvailable ? "found" : "missing")} remote={t.RemoteConnected} rtt={t.RttMs:0}ms buf={t.BufferSize}/{t.BufferCapacity} eps={t.Epsilon:0.000} w={t.NetWeight:0.00} avgLoss100={t.AvgLoss100:0.000}";
+        var (enabled, reason) = ComputeMlEnabled(mlCfg, backendKind, mlCfg.RemoteStrict, _ml.TryConnectRemote());
+        var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason);
+        return $"enable={enabled} backendKind={t.BackendKind} coreAvailable={t.CoreAvailable} remoteConnected={t.RemoteConnected} rttMs={t.RttMs:0} lastError={t.LastRemoteError ?? "n/a"} reasonIfDisabled={reason ?? "n/a"}";
     }
 
     public bool TryConnectMl() => _ml.TryConnectRemote();
     public void DisconnectMl() => _ml.DisconnectRemote();
+
+    private static (bool Enabled, string? Reason) ComputeMlEnabled(MlConfig cfg, string backendKind, bool remoteStrict, bool remoteConnected)
+    {
+        if (!cfg.Enable)
+            return (false, "ml.enable=false (brainconfig)");
+
+        if (backendKind == "off")
+            return (false, "backend=off");
+
+        if (backendKind == "local" && !MlCoreAvailability.IsAvailable)
+            return (false, MlCoreMissingReason);
+
+        if (backendKind == "remote" && !remoteConnected)
+        {
+            var reason = "remote not connected: run mlconnect or check host/port";
+            return remoteStrict ? (false, reason) : (true, null);
+        }
+
+        return (true, null);
+    }
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -186,29 +206,14 @@ public sealed class LifeLoop
         _episode.Configure(mlConfig.EpisodeLengthTicks);
         _loop.Configure(mlConfig.LoopWindow, mlConfig.LoopSameK, mlConfig.LoopAltK);
         var backendKind = (mlConfig.Backend ?? "off").Trim().ToLowerInvariant();
-        if (backendKind == "off")
-            mlConfig = mlConfig with { Enable = false };
-        if (backendKind == "local" && !MlCoreAvailability.IsAvailable)
+        var remoteConnected = backendKind == "remote" && _ml.TryConnectRemote();
+        var (mlEnabled, disableReason) = ComputeMlEnabled(mlConfig, backendKind, mlConfig.RemoteStrict, remoteConnected);
+        if (!mlEnabled && disableReason?.Contains("ML.Core not linked") == true && !_mlCoreMissingLogged)
         {
-            if (!_mlCoreMissingLogged)
-            {
-                if (mlConfig.StrictRequireCore)
-                    _log("ERROR: ML.Core not found, ml.enable forced false");
-                else
-                    _log("WARN: ML.Core not found, ml.enable forced false");
-                _mlCoreMissingLogged = true;
-            }
-            mlConfig = mlConfig with { Enable = false };
+            _log("WARN: ML.Core not linked, ml.enable forced false");
+            _mlCoreMissingLogged = true;
         }
-        if (backendKind == "remote" && mlConfig.Enable)
-        {
-            var connected = _ml.TryConnectRemote();
-            if (!connected && mlConfig.RemoteStrict)
-            {
-                _log("ERROR: ML remote unavailable, ml.enable forced false");
-                mlConfig = mlConfig with { Enable = false };
-            }
-        }
+        mlConfig = mlConfig with { Enable = mlEnabled };
         if (mlConfig.Enable && !_mlLoaded)
         {
             if (_ml.TryLoad(mlConfig.CheckpointPath, out var loadedEpisodeId))
@@ -283,7 +288,7 @@ public sealed class LifeLoop
                 _configVersion,
                 null,
                 _statsSnapshot,
-                _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200),
+                _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, disableReason),
                 null,
                 new DeepBrain.Shared.BrainDtos.V6.EpisodeInfoDto(
                     _episode.EpisodeId,
@@ -572,7 +577,7 @@ public sealed class LifeLoop
             _loop.AvgRewardShort
         );
 
-        var mlTelemetry = _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200);
+        var mlTelemetry = _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, disableReason);
         _mlTelemetry = mlTelemetry;
         if (mlConfig.Enable && _tick % 200 == 0)
             EmitTrace("ml.train", new { step = mlTelemetry.TrainSteps, loss = mlTelemetry.LastLoss }, ct);

@@ -254,7 +254,10 @@ public partial class MainWindow : Window
         {
             var loops = policy?.LoopCount ?? 0;
             var err = string.IsNullOrWhiteSpace(state.Ml.LastRemoteError) ? "" : $" err:{state.Ml.LastRemoteError}";
-            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} backend:{state.Ml.BackendKind} remote:{state.Ml.RemoteConnected} rtt:{state.Ml.RttMs:0}ms w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000} q:{state.Ml.AvgQ:0.000} buf:{state.Ml.BufferSize} steps:{state.Ml.TrainSteps} nan:{state.Ml.NanSkips} inv:{state.Ml.InvalidActionFallbackCount} loops:{loops}{err}";
+            var reason = !state.Ml.Enabled && !string.IsNullOrWhiteSpace(state.Ml.ReasonIfDisabled)
+                ? $" reason:{state.Ml.ReasonIfDisabled}"
+                : "";
+            LifeMlText.Text = $"ml: enable={state.Ml.Enabled} backend={state.Ml.BackendKind} core={state.Ml.CoreAvailable} remote={state.Ml.RemoteConnected} rtt={state.Ml.RttMs:0}ms eps={state.Ml.Epsilon:0.000} loss={state.Ml.LastLoss:0.000} avgQ={state.Ml.AvgQ:0.000} invalid={state.Ml.InvalidActionFallbackCount} loops={loops}{err}{reason}";
         }
         else
         {

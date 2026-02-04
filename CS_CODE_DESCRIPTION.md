@@ -6,6 +6,7 @@
 v0.8.1 добавляет безопасное подключение ML.Core через `ML_CORE_PATH`, stub‑режим без ML.Core и диагностику обучения.
 v0.8.2 добавляет эпизоды, декомпозицию награды, маскирование действий, усиленный loop‑detector и DQN‑обучение с target‑network.
 v0.8.3 добавляет ML Bridge: выбор backend (local/remote/off), интеграцию с ML.Host по TCP и расширенную телеметрию backend/remote.
+v0.8.4 добавляет ясный режим ML (reasonIfDisabled), mlstatus в одну строку и документацию `docs/ML_BACKENDS.md`.
 
 ---
 
@@ -154,7 +155,7 @@ MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
   `BufferSize`, `BufferCapacity`, `LastLoss`, `AvgLoss100`, `AvgReward200`, `AvgQ`,
   `Entropy`, `TrainSteps`, `NanSkips`, `IllegalChoiceCount`, `OverrideCount`,
   `InvalidActionFallbackCount`, `PolicySource`,
-  `BackendKind`, `RemoteConnected`, `RttMs`, `LastRemoteError`.
+  `BackendKind`, `RemoteConnected`, `RttMs`, `LastRemoteError`, `ReasonIfDisabled`.
 
 ### src/DeepBrain.Shared/MlBridge/MlBridgeDtos.cs
 Назначение: DTO для ML Bridge (remote backend).
@@ -452,6 +453,8 @@ v0.5:
 - `ml.backend` — `local|remote|off`;
 - `ml.remote` (host/port/timeoutMs/reconnectMs) — endpoint ML.Host;
 - `ml.remoteStrict` — при недоступности remote выключает ML.
+Дополнительно v0.8.4:
+- `ml.logBackendSwitches` — логировать смену backend (rate‑limit).
 
 ### src/DeepBrain.Host/BrainLife/AppraisalEngine.cs
 Назначение: оценивает threat/novelty/social/fatigue из мира, событий и состояния.
@@ -583,6 +586,8 @@ Connect: ping + подписки logs/state/trace/life/output.
 - `ml` расширено: core, avgQ, nan, invalidActionFallback.
 Поля v0.8.3 (Life panel):
 - `ml.backend`, `remoteConnected`, `rttMs`, `lastErr` (кратко в строке ml).
+Поля v0.8.4 (Life panel):
+- `reasonIfDisabled` (только когда ML выключен).
 
 ### src/DeepBrain.Studio/Net/TcpClientService.cs
 Назначение: TCP‑клиент.

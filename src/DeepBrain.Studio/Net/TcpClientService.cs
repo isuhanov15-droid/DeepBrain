@@ -156,7 +156,7 @@ public sealed class TcpClientService : IAsyncDisposable
                 break;
 
             case Msg.BrainLifeOutputAppend:
-                OnInfo?.Invoke($"life output received: {env.Payload?.GetType().Name ?? "null"}");
+                // no noisy info log for life outputs
                 OnLifeOutput?.Invoke(PayloadReader.Read<LifeOutputDto>(env.Payload));
                 break;
 

@@ -74,6 +74,7 @@ public sealed record BrainConfig(
                 ReconnectMs: 2000
             ),
             RemoteStrict: false,
+            LogBackendSwitches: true,
             Seed: 1337,
             LearningRate: 0.0005,
             Gamma: 0.98,
@@ -171,6 +172,7 @@ public sealed record MlConfig(
     string Backend,
     MlRemoteConfig Remote,
     bool RemoteStrict,
+    bool LogBackendSwitches,
     int Seed,
     double LearningRate,
     double Gamma,

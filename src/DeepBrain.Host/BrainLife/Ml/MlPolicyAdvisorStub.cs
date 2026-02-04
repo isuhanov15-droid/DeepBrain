@@ -27,7 +27,7 @@ public sealed class MlPolicyAdvisorStub : IMlPolicyAdvisor
     public void TrySave(string path, int episodeId) { }
     public void Reset(MlConfig config) { }
 
-    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200)
+    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled)
     {
         return new MlPolicyDto(
             Enabled: false,
@@ -52,7 +52,8 @@ public sealed class MlPolicyAdvisorStub : IMlPolicyAdvisor
             BackendKind: "stub",
             RemoteConnected: false,
             RttMs: 0,
-            LastRemoteError: null
+            LastRemoteError: null,
+            ReasonIfDisabled: reasonIfDisabled
         );
     }
 

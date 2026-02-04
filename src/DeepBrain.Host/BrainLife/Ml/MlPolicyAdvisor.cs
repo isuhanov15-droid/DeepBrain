@@ -26,6 +26,8 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
     private int _invalidActionFallbackCount;
     private double _epsilon = -1;
     private string _backendKind = "stub";
+    private DateTime _lastBackendLog = DateTime.MinValue;
+    private string? _lastBackendLogMsg;
 
     public MlPolicyAdvisor(MlConfig config, Action<string> log)
     {
@@ -194,7 +196,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         File.WriteAllText(path, json);
     }
 
-    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200)
+    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled)
     {
         if (!enabled)
         {
@@ -221,7 +223,8 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
                 BackendKind: _backendKind,
                 RemoteConnected: _backend.IsConnected,
                 RttMs: _backend.LastRttMs,
-                LastRemoteError: _backend.LastError
+                LastRemoteError: _backend.LastError,
+                ReasonIfDisabled: reasonIfDisabled
             );
         }
 
@@ -248,7 +251,8 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
             BackendKind: _backendKind,
             RemoteConnected: _backend.IsConnected,
             RttMs: _backend.LastRttMs,
-            LastRemoteError: _backend.LastError
+            LastRemoteError: _backend.LastError,
+            ReasonIfDisabled: reasonIfDisabled
         );
     }
 
@@ -271,7 +275,19 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         _backend = MlBackendFactory.Create(config, _log);
         _backendKind = _backend.Kind;
         _ = old.DisposeAsync();
-        _log($"info: ML backend switched to {_backendKind}");
+        if (config.LogBackendSwitches)
+            RateLimitedBackendLog($"info: ML backend switched to {_backendKind}");
+    }
+
+    private void RateLimitedBackendLog(string message)
+    {
+        var now = DateTime.UtcNow;
+        if (string.Equals(_lastBackendLogMsg, message, StringComparison.Ordinal)
+            && (now - _lastBackendLog).TotalSeconds < 10)
+            return;
+        _lastBackendLog = now;
+        _lastBackendLogMsg = message;
+        _log(message);
     }
 
     private double ComputeNetWeight(MlConfig config, int bufferSize)

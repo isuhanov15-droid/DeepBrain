@@ -53,9 +53,9 @@
     "tenderArousalMax": 0.35
   },
   "ml": {
-    "enable": false,
-    "strictRequireCore": false,
-    "backend": "local",
+    "enable": true,
+    "strictRequireCore": true,
+    "backend": "remote",
     "remote": {
       "host": "127.0.0.1",
       "port": 7777,
@@ -63,6 +63,7 @@
       "reconnectMs": 2000
     },
     "remoteStrict": false,
+    "logBackendSwitches": true,
     "seed": 1337,
     "learningRate": 0.0005,
     "gamma": 0.98,
@@ -86,5 +87,5 @@
     "epsilonMin": 0.05,
     "actionMasking": true
   },
-  "useMlAdvisor": false
+  "useMlAdvisor": true
 }
