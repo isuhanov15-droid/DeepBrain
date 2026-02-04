@@ -5,5 +5,6 @@ public sealed record RewardDto(
     double Explore,
     double Social,
     double LoopPenalty,
+    double InvalidActionPenalty,
     double Total
 );

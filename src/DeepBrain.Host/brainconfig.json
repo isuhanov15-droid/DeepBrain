@@ -52,6 +52,23 @@
     "tenderSocialMin": 0.35,
     "tenderArousalMax": 0.35
   },
+  "reward": {
+    "homeostasisWeight": 1.0,
+    "exploreWeight": 1.0,
+    "socialWeight": 1.0,
+    "loopPenaltyWeight": 0.05,
+    "invalidActionPenalty": 0.05,
+    "exploreBase": 0.01,
+    "socialBase": 0.01
+  },
+  "episode": {
+    "maxSteps": 1200,
+    "loopStrengthThreshold": 0.85,
+    "loopHoldTicks": 6,
+    "panicSafetyMin": 0.10,
+    "panicPainMin": 0.95,
+    "panicThreatMin": 0.90
+  },
   "ml": {
     "enable": true,
     "strictRequireCore": true,

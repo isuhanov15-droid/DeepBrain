@@ -119,7 +119,7 @@ public sealed class LifeLoop
         _output = output;
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
-        _episode = new EpisodeManager(cfg.Ml.EpisodeLengthTicks);
+        _episode = new EpisodeManager(cfg.Episode.MaxSteps);
         _ml = MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
     }
 
@@ -203,7 +203,7 @@ public sealed class LifeLoop
         var (config, version) = _configLoader.GetCurrent();
         _configVersion = version;
         var mlConfig = config.Ml with { Enable = config.Ml.Enable || config.UseMlAdvisor };
-        _episode.Configure(mlConfig.EpisodeLengthTicks);
+        _episode.Configure(config.Episode);
         _loop.Configure(mlConfig.LoopWindow, mlConfig.LoopSameK, mlConfig.LoopAltK);
         var backendKind = (mlConfig.Backend ?? "off").Trim().ToLowerInvariant();
         var remoteConnected = backendKind == "remote" && _ml.TryConnectRemote();
@@ -225,8 +225,6 @@ public sealed class LifeLoop
         }
         if (mlConfig.Enable && _tick > 0 && _tick % 500 == 0)
             _ml.TrySave(mlConfig.CheckpointPath, _episode.EpisodeId);
-
-        var pendingEpisodeReset = _episode.Tick(out var episodeResetReason);
 
         _clock.Tick(dtSeconds, _sleep.IsSleeping);
         _sleep.Update(_clock, ref _homeo, ref _affect);
@@ -395,17 +393,16 @@ public sealed class LifeLoop
         );
 
         var actionMask = _masker.BuildMask(_homeo, _affect, _cooldowns, _tick, emitCooldown, config.Actions, _loop.IsLoopDetected);
-        if (mlConfig.ActionMasking)
-        {
-            candidates = candidates
-                .Where(c => IsMaskAllowed(actionMask, c.Action.Name))
-                .ToList();
-        }
+        candidates = candidates
+            .Where(c => IsMaskAllowed(actionMask, c.Action.Name))
+            .ToList();
 
+        var maskFallback = false;
         if (candidates.Count == 0)
         {
             var fallback = FirstAllowed(actionMask) ?? "rest_short";
             candidates.Add(new ActionSelector.Candidate(new ActionDto("internal", fallback, 0.2, null), 0.1 + (1 - _homeo.Energy), "mask_fallback"));
+            maskFallback = true;
         }
 
         var allowedActions = mlConfig.ActionMasking
@@ -439,11 +436,14 @@ public sealed class LifeLoop
         var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, actionMask, mlConfig, _tick);
         var chosen = candidates.FirstOrDefault(c => c.Action.Name == decision.ActionName) ?? ActionSelector.PickBest(candidates);
         var action = chosen.Action;
+        var maskStatus = maskFallback ? "fallback" : "ok";
         var reason = decision.PolicySource == "heuristic" ? chosen.Reason : $"{chosen.Reason}|{decision.PolicySource}";
+        reason = $"{reason}|mask={maskStatus}";
         if (decision.IllegalChoice)
             _log("ML_INVALID_ACTION_FALLBACK");
 
-        EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason }, ct);
+        var invalidAction = decision.IllegalChoice || !IsMaskAllowed(actionMask, action.Name);
+        EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason, mask = maskStatus }, ct);
 
         var outcome = _actuator.Apply(action, ref _homeo, ref _affect);
 
@@ -455,11 +455,11 @@ public sealed class LifeLoop
         if (action.Name == "explore_signal")
             _world.DampenNovelty(action.Strength);
 
-        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, 0.0);
+        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, 0.0, invalidAction, config.Reward);
         var regBonus = ComputeRegulationBonus(action, beforeHomeo, _homeo, beforeAffect, _affect);
         rewardBase = ApplyHomeostasisBonus(rewardBase, regBonus);
-        _loop.Update(action.Name, rewardBase.Total, _tick);
-        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.LoopPenalty);
+        _loop.Update(action.Name, _affect.Mood, _affect.Arousal, _homeo.Energy, _homeo.Fatigue, dominantDrive, circ.Phase, attention.Focus1, rewardBase.Total, _tick);
+        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.LoopStrength, invalidAction, config.Reward);
         rewardDto = ApplyHomeostasisBonus(rewardDto, regBonus);
         _learning.Update(action.Name, rewardDto.Total);
         _cooldowns.Mark(action.Name, _tick);
@@ -467,20 +467,15 @@ public sealed class LifeLoop
 
         if (_loop.IsLoopDetected && _loop.ShouldAnnounceLoop(_tick))
         {
-            EmitTrace("loop.detected", new { type = _loop.LoopType, streak = _loop.SameActionStreak, avgR = _loop.AvgRewardShort }, ct);
-            _log($"LOOP_DETECTED type={_loop.LoopType} tick={_tick}");
+            EmitTrace("loop.detected", new { type = _loop.LoopType, streak = _loop.Streak, strength = _loop.LoopStrength, avgR = _loop.AvgRewardShort }, ct);
+            _log($"LOOP_DETECTED type={_loop.LoopType} tick={_tick} strength={_loop.LoopStrength:0.00}");
         }
 
-        var resetReason = "none";
-        if (_loop.IsHeavyLoop)
-            resetReason = "loop";
-        else if (pendingEpisodeReset && !string.IsNullOrWhiteSpace(episodeResetReason))
-            resetReason = episodeResetReason!;
-        else if (pendingEpisodeReset)
-            resetReason = "length";
-
-        if (_loop.LoopPenalty > 0.9 && _loop.SameActionStreak >= 12)
-            resetReason = "panic";
+        var isPanic = _episode.IsPanic(_homeo.Safety, _homeo.Pain, _world.Threat);
+        var pendingEpisodeReset = _episode.Tick(_loop.LoopStrength, _loop.IsLoopDetected, isPanic, out var episodeResetReason);
+        var resetReason = pendingEpisodeReset && !string.IsNullOrWhiteSpace(episodeResetReason)
+            ? episodeResetReason!
+            : "none";
 
         if (mlConfig.Enable && stateVec.Length > 0)
         {
@@ -721,7 +716,7 @@ public sealed class LifeLoop
     {
         if (Math.Abs(bonus) < 1e-9) return reward;
         var homeo = reward.Homeostasis + bonus;
-        var total = Math.Clamp(homeo + reward.Explore + reward.Social + reward.LoopPenalty, -1.0, 1.0);
+        var total = Math.Clamp(homeo + reward.Explore + reward.Social + reward.LoopPenalty + reward.InvalidActionPenalty, -1.0, 1.0);
         return reward with { Homeostasis = homeo, Total = total };
     }
 

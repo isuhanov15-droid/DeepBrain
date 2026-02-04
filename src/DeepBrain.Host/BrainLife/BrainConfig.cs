@@ -6,6 +6,8 @@ public sealed record BrainConfig(
     DrivesConfig Drives,
     ActionsConfig Actions,
     MoodConfig Mood,
+    RewardConfig Reward,
+    EpisodeConfig Episode,
     MlConfig Ml,
     bool UseMlAdvisor = false)
 {
@@ -62,6 +64,23 @@ public sealed record BrainConfig(
             CuriousArousalMax: 0.45,
             TenderSocialMin: 0.35,
             TenderArousalMax: 0.35
+        ),
+        new RewardConfig(
+            HomeostasisWeight: 1.0,
+            ExploreWeight: 1.0,
+            SocialWeight: 1.0,
+            LoopPenaltyWeight: 0.05,
+            InvalidActionPenalty: 0.05,
+            ExploreBase: 0.01,
+            SocialBase: 0.01
+        ),
+        new EpisodeConfig(
+            MaxSteps: 1200,
+            LoopStrengthThreshold: 0.85,
+            LoopHoldTicks: 6,
+            PanicSafetyMin: 0.10,
+            PanicPainMin: 0.95,
+            PanicThreatMin: 0.90
         ),
         new MlConfig(
             Enable: false,
@@ -157,6 +176,25 @@ public sealed record MoodConfig(
     double CuriousArousalMax,
     double TenderSocialMin,
     double TenderArousalMax
+);
+
+public sealed record RewardConfig(
+    double HomeostasisWeight,
+    double ExploreWeight,
+    double SocialWeight,
+    double LoopPenaltyWeight,
+    double InvalidActionPenalty,
+    double ExploreBase,
+    double SocialBase
+);
+
+public sealed record EpisodeConfig(
+    int MaxSteps,
+    double LoopStrengthThreshold,
+    int LoopHoldTicks,
+    double PanicSafetyMin,
+    double PanicPainMin,
+    double PanicThreatMin
 );
 
 public sealed record MlRemoteConfig(

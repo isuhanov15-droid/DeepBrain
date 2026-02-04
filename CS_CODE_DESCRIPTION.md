@@ -7,6 +7,12 @@ v0.8.1 добавляет безопасное подключение ML.Core ч
 v0.8.2 добавляет эпизоды, декомпозицию награды, маскирование действий, усиленный loop‑detector и DQN‑обучение с target‑network.
 v0.8.3 добавляет ML Bridge: выбор backend (local/remote/off), интеграцию с ML.Host по TCP и расширенную телеметрию backend/remote.
 v0.8.4 добавляет ясный режим ML (reasonIfDisabled), mlstatus в одну строку и документацию `docs/ML_BACKENDS.md`.
+v0.8.5 добавляет новое поведенческое ядро: loop detector по fingerprint, эпизоды, декомпозицию награды и жёсткое action masking.
+
+### Manual check (v0.8.5)
+1) Запустить Host + Studio и наблюдать 10–15 минут: trace/state/output обновляются.
+2) Индуцировать loop (например, временно ограничить действия маской) и увидеть рост loopStrength и `episode` reset с reason=loop.
+3) Убедиться, что после reset эпизода система продолжает работать и начинает новый эпизод.
 
 ---
 

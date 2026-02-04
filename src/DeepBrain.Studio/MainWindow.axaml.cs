@@ -125,7 +125,7 @@ public partial class MainWindow : Window
         LifeRewardText.Text = $"lastReward={state.LastReward:0.000}  tick={state.Tick}";
         if (state.Reward is not null)
         {
-            LifeRewardBreakdownText.Text = $"reward=tot:{state.Reward.Total:+0.000;-0.000} h:{state.Reward.Homeostasis:+0.000;-0.000} x:{state.Reward.Explore:+0.000;-0.000} s:{state.Reward.Social:+0.000;-0.000} lp:{state.Reward.LoopPenalty:+0.000;-0.000}";
+            LifeRewardBreakdownText.Text = $"reward=tot:{state.Reward.Total:+0.000;-0.000} h:{state.Reward.Homeostasis:+0.000;-0.000} x:{state.Reward.Explore:+0.000;-0.000} s:{state.Reward.Social:+0.000;-0.000} lp:{state.Reward.LoopPenalty:+0.000;-0.000} ia:{state.Reward.InvalidActionPenalty:+0.000;-0.000}";
         }
         else
         {
