@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace DeepBrain.Shared.MlBridge;
 
 public sealed record MlInferRequest(
     float[] State,
-    float[]? ActionMask,
+    [property: JsonConverter(typeof(FlexibleBoolArrayConverter))]
+    bool[]? ActionMask,
     int InputDim,
     int ActionCount
 );
@@ -21,7 +24,8 @@ public sealed record MlTransitionDto(
     float Reward,
     float[] NextState,
     bool Done,
-    float[]? NextActionMask
+    [property: JsonConverter(typeof(FlexibleBoolArrayConverter))]
+    bool[]? NextActionMask
 );
 
 public sealed record MlTrainConfigDto(

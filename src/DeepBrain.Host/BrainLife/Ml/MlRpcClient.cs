@@ -75,7 +75,18 @@ internal sealed class MlRpcClient : IAsyncDisposable
                 return default;
             }
 
-            var resp = JsonSerializer.Deserialize<RpcResponse>(responseJson, _json);
+            RpcResponse? resp;
+            try
+            {
+                resp = JsonSerializer.Deserialize<RpcResponse>(responseJson, _json);
+            }
+            catch (JsonException jex)
+            {
+                LogJsonException("rpc.response", responseJson, jex);
+                _lastError = jex.Message;
+                Disconnect();
+                return default;
+            }
             if (resp == null)
             {
                 _lastError = "rpc response parse failed";
@@ -93,7 +104,16 @@ internal sealed class MlRpcClient : IAsyncDisposable
                 return default;
 
             var text = resp.result.Value.GetRawText();
-            return JsonSerializer.Deserialize<TResponse>(text, _json);
+            try
+            {
+                return JsonSerializer.Deserialize<TResponse>(text, _json);
+            }
+            catch (JsonException jex)
+            {
+                LogJsonException("rpc.result", text, jex);
+                _lastError = jex.Message;
+                return default;
+            }
         }
         catch (Exception ex)
         {
@@ -199,4 +219,11 @@ internal sealed class MlRpcClient : IAsyncDisposable
     private sealed record RpcRequest(int v, string id, string method, object? @params);
     private sealed record RpcResponse(int v, string id, bool ok, JsonElement? result, RpcError? error);
     private sealed record RpcError(string code, string message, string? details);
+
+    private void LogJsonException(string stage, string json, JsonException ex)
+    {
+        var max = Math.Min(json.Length, 1000);
+        var snippet = json[..max];
+        _log($"warn: json parse error ({stage}) path={ex.Path} msg={ex.Message} payload={snippet}");
+    }
 }

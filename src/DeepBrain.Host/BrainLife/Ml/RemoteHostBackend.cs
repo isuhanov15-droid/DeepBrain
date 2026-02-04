@@ -39,7 +39,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         BufferCapacity = Math.Max(1024, config.BufferSize);
         var req = new MlInferRequest(
             State: stateVec,
-            ActionMask: config.ActionMasking ? actionMask : null,
+            ActionMask: config.ActionMasking ? ToBoolMask(actionMask) : null,
             InputDim: StateVectorizer.InputDim,
             ActionCount: ActionCatalog.Count
         );
@@ -66,7 +66,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
                 transition.Reward,
                 transition.NextState,
                 transition.Done,
-                transition.ActionMask
+                ToBoolMask(transition.ActionMask)
             ),
             Config: new MlTrainConfigDto(
                 BufferSize: BufferCapacity,
@@ -157,5 +157,14 @@ public sealed class RemoteHostBackend : IBrainMlBackend
             return;
         _lastErrorLog = now;
         _log(message);
+    }
+
+    private static bool[]? ToBoolMask(float[]? mask)
+    {
+        if (mask == null) return null;
+        var arr = new bool[mask.Length];
+        for (var i = 0; i < mask.Length; i++)
+            arr[i] = mask[i] > 0.5f;
+        return arr;
     }
 }
