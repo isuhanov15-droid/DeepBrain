@@ -1,5 +1,6 @@
 #if ML_CORE
 using System.Linq;
+using System.Text.Json;
 using DeepBrain.Shared.BrainDtos.V6;
 
 namespace DeepBrain.Host.BrainLife.Ml;
@@ -20,9 +21,12 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
     private string _policySource = "heuristic";
     private double _lastNetWeight;
     private double _lastEpsilon;
+    private double _avgQ;
     private int _nanSkips;
     private int _illegalChoiceCount;
     private int _overrideCount;
+    private int _invalidActionFallbackCount;
+    private double _epsilon = -1;
 
     public MlPolicyAdvisorReal(MlConfig config, Action<string> log)
     {
@@ -40,12 +44,15 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
         _buffer = new ExperienceBuffer(Math.Max(1024, config.BufferSize));
         _net.Reset(config.Seed, config.LearningRate);
         _entropy = 0;
+        _avgQ = 0;
         _policySource = "heuristic";
         _lastNetWeight = 0;
         _lastEpsilon = 0;
         _nanSkips = 0;
         _illegalChoiceCount = 0;
         _overrideCount = 0;
+        _invalidActionFallbackCount = 0;
+        _epsilon = config.EpsilonStart;
         _lossWindow.Clear();
         _overrideWindow.Clear();
     }
@@ -55,49 +62,69 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
         _nanSkips = 0;
         _illegalChoiceCount = 0;
         _overrideCount = 0;
+        _invalidActionFallbackCount = 0;
         _lossWindow.Clear();
         _overrideWindow.Clear();
     }
 
-    public PolicyDecision SelectAction(float[] stateVec, IReadOnlyDictionary<string, double> heuristicScores, IReadOnlyList<string> allowedActions, MlConfig config, long tick)
+    public PolicyDecision SelectAction(float[] stateVec, IReadOnlyDictionary<string, double> heuristicScores, IReadOnlyList<string> allowedActions, float[] actionMask, MlConfig config, long tick)
     {
         var heuristicBest = PickHeuristicBest(heuristicScores, allowedActions);
         if (!config.Enable || stateVec.Length != _net.InputDim)
             return new PolicyDecision(heuristicBest, 0, 0, 0, "heuristic", false, false, false);
 
-        var probs = _net.PredictProbs(stateVec);
-        if (probs.Length != ActionCatalog.Count || probs.Any(p => float.IsNaN(p) || float.IsInfinity(p)))
+        var q = _net.PredictQ(stateVec);
+        _avgQ = q.Length == 0 ? 0 : q.Average();
+        var probs = PolicyNetAdapter.Softmax(q);
+        if (probs.Length != ActionCatalog.Count || probs.Any(p => double.IsNaN(p) || double.IsInfinity(p)))
             return new PolicyDecision(heuristicBest, 0, 0, 0, "heuristic", false, false, false);
+
+        var mask = config.ActionMasking ? NormalizeMask(actionMask) : null;
+        if (mask is not null)
+            ApplyMask(probs, mask);
 
         _entropy = ComputeEntropy(probs);
         var netWeight = ComputeNetWeight(config, _buffer.Count);
-        var epsilon = ComputeEpsilon(config, _trainer.TrainSteps);
+        var epsilon = ComputeEpsilon(config);
 
-        var finalScores = BlendScores(heuristicScores, probs, netWeight);
+        var finalScores = BlendScores(heuristicScores, probs.Select(p => (float)p).ToArray(), netWeight);
         var actionName = ChooseAction(finalScores, allowedActions, epsilon, _rng);
         var illegal = !allowedActions.Contains(actionName);
+        var maskedOut = mask is not null && IsMaskedOut(actionName, mask);
         if (illegal)
         {
             _illegalChoiceCount++;
+            _invalidActionFallbackCount++;
+            actionName = heuristicBest;
+        }
+        else if (maskedOut)
+        {
+            _invalidActionFallbackCount++;
             actionName = heuristicBest;
         }
 
-        var usedMl = netWeight > 0.01 && !illegal;
+        var usedMl = netWeight > 0.01 && !illegal && !maskedOut;
         var overrideHeuristic = usedMl && actionName != heuristicBest;
         PushOverride(overrideHeuristic);
 
         _policySource = netWeight <= 0.01 ? "heuristic" : netWeight >= 0.6 ? "net" : "blend";
-        return new PolicyDecision(actionName, netWeight, epsilon, _entropy, _policySource, usedMl, illegal, overrideHeuristic);
+        return new PolicyDecision(actionName, netWeight, epsilon, _entropy, _policySource, usedMl, illegal || maskedOut, overrideHeuristic);
     }
 
-    public void Observe(float[] state, int actionIdx, float reward, float[] nextState, MlConfig config, long tick)
+    public void Observe(float[] state, int actionIdx, float reward, float[] nextState, bool done, float[] nextActionMask, MlConfig config, long tick)
     {
         if (!config.Enable) return;
         if (actionIdx < 0 || actionIdx >= ActionCatalog.Count) return;
         if (state.Length != _net.InputDim || nextState.Length != _net.InputDim) return;
 
         var clampedReward = (float)Math.Clamp(reward, -1.0, 1.0);
-        _buffer.Add(new Transition(state, actionIdx, clampedReward, nextState, Done: false));
+        var mask = config.ActionMasking ? NormalizeMask(nextActionMask) : null;
+        mask ??= new float[ActionCatalog.Count];
+        if (mask.All(v => v == 0f))
+        {
+            for (var i = 0; i < mask.Length; i++) mask[i] = 1f;
+        }
+        _buffer.Add(new Transition(state, actionIdx, clampedReward, nextState, done, mask));
         var result = _trainer.TryTrain(tick, config);
         if (result.IsNaN)
         {
@@ -111,12 +138,13 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
             PushLoss(result.Loss);
     }
 
-    public MlPolicyDto BuildTelemetry(bool enabled, int inputDim, int actionCount, double avgReward200)
+    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200)
     {
         if (!enabled)
         {
             return new MlPolicyDto(
                 Enabled: false,
+                CoreAvailable: coreAvailable,
                 InputDim: inputDim,
                 ActionCount: actionCount,
                 BufferSize: _buffer.Count,
@@ -126,17 +154,20 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
                 LastLoss: _trainer.LastLoss,
                 AvgLoss100: AverageLoss(),
                 AvgReward200: avgReward200,
+                AvgQ: _avgQ,
                 Entropy: 0,
                 TrainSteps: _trainer.TrainSteps,
                 NanSkips: _nanSkips,
                 IllegalChoiceCount: _illegalChoiceCount,
                 OverrideCount: _overrideCount,
+                InvalidActionFallbackCount: _invalidActionFallbackCount,
                 PolicySource: "heuristic"
             );
         }
 
         return new MlPolicyDto(
             Enabled: enabled,
+            CoreAvailable: coreAvailable,
             InputDim: inputDim,
             ActionCount: actionCount,
             BufferSize: _buffer.Count,
@@ -146,22 +177,59 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
             LastLoss: _trainer.LastLoss,
             AvgLoss100: AverageLoss(),
             AvgReward200: avgReward200,
+            AvgQ: _avgQ,
             Entropy: _entropy,
             TrainSteps: _trainer.TrainSteps,
             NanSkips: _nanSkips,
             IllegalChoiceCount: _illegalChoiceCount,
             OverrideCount: _overrideCount,
+            InvalidActionFallbackCount: _invalidActionFallbackCount,
             PolicySource: _policySource
         );
     }
 
-    public void TrySave(string path)
+    public void TrySave(string path, int episodeId)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
-        _net.Save(path);
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+        var weightsPath = path + ".net";
+        _net.Save(weightsPath);
+        var meta = new MlCheckpointMeta(episodeId, _epsilon, _trainer.TrainSteps, weightsPath);
+        var json = JsonSerializer.Serialize(meta);
+        File.WriteAllText(path, json);
     }
 
-    public bool TryLoad(string path) => _net.TryLoad(path);
+    public bool TryLoad(string path, out int episodeId)
+    {
+        episodeId = 0;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return false;
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            var meta = JsonSerializer.Deserialize<MlCheckpointMeta>(json);
+            if (meta is not null && !string.IsNullOrWhiteSpace(meta.WeightsPath) && File.Exists(meta.WeightsPath))
+            {
+                if (_net.TryLoad(meta.WeightsPath))
+                {
+                    episodeId = meta.EpisodeId;
+                    _epsilon = meta.Epsilon;
+                    _trainer.SetTrainSteps(meta.TrainSteps);
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        if (_net.TryLoad(path))
+            return true;
+        return false;
+    }
 
     private double ComputeNetWeight(MlConfig config, int bufferSize)
     {
@@ -172,10 +240,12 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
         return w;
     }
 
-    private double ComputeEpsilon(MlConfig config, long steps)
+    private double ComputeEpsilon(MlConfig config)
     {
-        var eps = config.EpsilonStart * Math.Pow(config.EpsilonDecay, steps);
-        eps = Math.Max(config.EpsilonEnd, eps);
+        if (_epsilon < 0) _epsilon = config.EpsilonStart;
+        var min = config.EpsilonMin > 0 ? config.EpsilonMin : config.EpsilonEnd;
+        _epsilon = Math.Max(min, _epsilon - config.EpsilonDecay);
+        var eps = _epsilon;
         _lastEpsilon = eps;
         return eps;
     }
@@ -250,15 +320,44 @@ public sealed class MlPolicyAdvisorReal : IMlPolicyAdvisor
         return scores;
     }
 
-    private static double ComputeEntropy(float[] probs)
+    private static double ComputeEntropy(double[] probs)
     {
         double sum = 0;
         for (var i = 0; i < probs.Length; i++)
         {
-            var p = Math.Clamp(probs[i], 1e-6f, 1.0f);
+            var p = Math.Clamp(probs[i], 1e-6, 1.0);
             sum -= p * Math.Log(p);
         }
         return sum / Math.Log(probs.Length);
     }
+
+    private static float[]? NormalizeMask(float[]? mask)
+    {
+        if (mask is null || mask.Length != ActionCatalog.Count) return null;
+        return mask;
+    }
+
+    private static void ApplyMask(double[] probs, float[] mask)
+    {
+        double sum = 0;
+        for (var i = 0; i < probs.Length; i++)
+        {
+            if (mask[i] <= 0f)
+                probs[i] = 0;
+            sum += probs[i];
+        }
+        if (sum <= 0) return;
+        for (var i = 0; i < probs.Length; i++)
+            probs[i] /= sum;
+    }
+
+    private static bool IsMaskedOut(string actionName, float[] mask)
+    {
+        var idx = ActionCatalog.IndexOf(actionName);
+        if (idx < 0 || idx >= mask.Length) return false;
+        return mask[idx] <= 0f;
+    }
+
+    private sealed record MlCheckpointMeta(int EpisodeId, double Epsilon, long TrainSteps, string WeightsPath);
 }
 #endif

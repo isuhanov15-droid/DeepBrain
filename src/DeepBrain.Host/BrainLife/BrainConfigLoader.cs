@@ -37,6 +37,12 @@ public sealed class BrainConfigLoader
         return (_current, _version);
     }
 
+    public void ReloadNow()
+    {
+        TryReload(force: true);
+        _version = $"{_version}-r{DateTime.UtcNow:HHmmss}";
+    }
+
     private void TryReload(bool force)
     {
         try

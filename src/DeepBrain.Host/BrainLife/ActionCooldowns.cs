@@ -20,4 +20,26 @@ public sealed class ActionCooldowns
     {
         _lastTick[actionName] = tick;
     }
+
+    public void ResetAll()
+    {
+        _lastTick.Clear();
+    }
+
+    public void ResetExcept(params string[] keep)
+    {
+        if (keep.Length == 0)
+        {
+            _lastTick.Clear();
+            return;
+        }
+
+        var set = new HashSet<string>(keep, StringComparer.Ordinal);
+        var keys = _lastTick.Keys.ToArray();
+        foreach (var key in keys)
+        {
+            if (!set.Contains(key))
+                _lastTick.Remove(key);
+        }
+    }
 }

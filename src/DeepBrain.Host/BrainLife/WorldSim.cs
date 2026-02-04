@@ -86,6 +86,18 @@ public sealed class WorldSim
         return newEvents;
     }
 
+    public void ResetEpisode()
+    {
+        Threat = BaselineThreat;
+        Tension = BaselineTension;
+        Noise = 0.2;
+        Novelty = 0.5;
+        SocialPresence = 0.4;
+        _lastThreatTick = -1000;
+        _lastMajorEvent = "none";
+        _events.Reset();
+    }
+
     public void DampenNovelty(double strength)
     {
         Novelty = LifeMath.Clamp01(Novelty - 0.3 * strength);

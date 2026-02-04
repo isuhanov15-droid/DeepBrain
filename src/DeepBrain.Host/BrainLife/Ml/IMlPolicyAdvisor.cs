@@ -5,12 +5,12 @@ namespace DeepBrain.Host.BrainLife.Ml;
 public interface IMlPolicyAdvisor
 {
     float[] Encode(StateVectorInput input);
-    PolicyDecision SelectAction(float[] stateVec, IReadOnlyDictionary<string, double> heuristicScores, IReadOnlyList<string> allowedActions, MlConfig config, long tick);
-    void Observe(float[] state, int actionIdx, float reward, float[] nextState, MlConfig config, long tick);
-    bool TryLoad(string path);
-    void TrySave(string path);
+    PolicyDecision SelectAction(float[] stateVec, IReadOnlyDictionary<string, double> heuristicScores, IReadOnlyList<string> allowedActions, float[] actionMask, MlConfig config, long tick);
+    void Observe(float[] state, int actionIdx, float reward, float[] nextState, bool done, float[] nextActionMask, MlConfig config, long tick);
+    bool TryLoad(string path, out int episodeId);
+    void TrySave(string path, int episodeId);
     void Reset(MlConfig config);
-    MlPolicyDto BuildTelemetry(bool enabled, int inputDim, int actionCount, double avgReward200);
+    MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200);
     void ResetCounters();
 }
 

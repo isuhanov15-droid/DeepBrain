@@ -75,11 +75,19 @@ public sealed record BrainConfig(
             TrainStepsPerBatch: 1,
             NetWeightMax: 0.6,
             NetWeightWarmup: 5000,
-            EpsilonStart: 0.35,
+            EpsilonStart: 1.0,
             EpsilonEnd: 0.05,
-            EpsilonDecay: 0.999,
+            EpsilonDecay: 0.0005,
             GradClip: 1.0,
-            CheckpointPath: "ML/Models/deepbrain-policy.json"
+            CheckpointPath: "checkpoints/brain_ml.chk",
+            EpisodeLengthTicks: 1200,
+            LoopWindow: 32,
+            LoopSameK: 8,
+            LoopAltK: 6,
+            LoopBreakTicks: 20,
+            TargetUpdateTicks: 200,
+            EpsilonMin: 0.05,
+            ActionMasking: true
         )
     );
 }
@@ -158,5 +166,13 @@ public sealed record MlConfig(
     double EpsilonEnd,
     double EpsilonDecay,
     double GradClip,
-    string CheckpointPath
+    string CheckpointPath,
+    int EpisodeLengthTicks,
+    int LoopWindow,
+    int LoopSameK,
+    int LoopAltK,
+    int LoopBreakTicks,
+    int TargetUpdateTicks,
+    double EpsilonMin,
+    bool ActionMasking
 );

@@ -11,10 +11,13 @@ public sealed record MlPolicyDto(
     double LastLoss,
     double AvgLoss100,
     double AvgReward200,
+    double AvgQ,
     double Entropy,
     long TrainSteps,
     int NanSkips,
     int IllegalChoiceCount,
     int OverrideCount,
-    string PolicySource
+    int InvalidActionFallbackCount,
+    string PolicySource,
+    bool CoreAvailable
 );

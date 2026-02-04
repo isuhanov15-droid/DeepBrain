@@ -123,6 +123,23 @@ public partial class MainWindow : Window
         LifeInstinctsText.Text = $"instincts: self={state.Instincts.SelfPreservation:0.00} energy={state.Instincts.EnergyConservation:0.00} explore={state.Instincts.Exploration:0.00} attach={state.Instincts.Attachment:0.00} agency={state.Instincts.Agency:0.00}";
         LifeDecisionText.Text = $"lastDecision={state.LastDecision}";
         LifeRewardText.Text = $"lastReward={state.LastReward:0.000}  tick={state.Tick}";
+        if (state.Reward is not null)
+        {
+            LifeRewardBreakdownText.Text = $"reward=tot:{state.Reward.Total:+0.000;-0.000} h:{state.Reward.Homeostasis:+0.000;-0.000} x:{state.Reward.Explore:+0.000;-0.000} s:{state.Reward.Social:+0.000;-0.000} lp:{state.Reward.LoopPenalty:+0.000;-0.000}";
+        }
+        else
+        {
+            LifeRewardBreakdownText.Text = "reward=n/a";
+        }
+
+        if (state.Episode is not null)
+        {
+            LifeEpisodeText.Text = $"episode={state.Episode.EpisodeId} tick={state.Episode.EpisodeTick}/{state.Episode.EpisodeLengthTicks} reason={state.Episode.ResetReason}";
+        }
+        else
+        {
+            LifeEpisodeText.Text = "episode=n/a";
+        }
         var policy = state.Policy;
         LifeStrategyText.Text = $"strategy={policy?.Strategy ?? "n/a"} reason={policy?.Reason ?? ""}";
         LifeDriveText.Text = $"drive={state.DominantDrive}";
@@ -235,7 +252,8 @@ public partial class MainWindow : Window
 
         if (state.Ml is not null)
         {
-            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000}/avg:{state.Ml.AvgLoss100:0.000} buf:{state.Ml.BufferSize}/{state.Ml.BufferCapacity} ent:{state.Ml.Entropy:0.00} src:{state.Ml.PolicySource} nan:{state.Ml.NanSkips} ill:{state.Ml.IllegalChoiceCount} ov:{state.Ml.OverrideCount}";
+            var loops = policy?.LoopCount ?? 0;
+            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} core:{state.Ml.CoreAvailable} w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000} q:{state.Ml.AvgQ:0.000} buf:{state.Ml.BufferSize} steps:{state.Ml.TrainSteps} nan:{state.Ml.NanSkips} inv:{state.Ml.InvalidActionFallbackCount} loops:{loops}";
         }
         else
         {

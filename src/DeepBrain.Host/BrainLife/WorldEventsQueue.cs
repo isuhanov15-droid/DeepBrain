@@ -62,4 +62,10 @@ public sealed class WorldEventsQueue
             _consumedCount += count;
         return count;
     }
+
+    public void Reset()
+    {
+        _events.Clear();
+        _consumedCount = 0;
+    }
 }

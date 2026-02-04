@@ -10,7 +10,8 @@ public static class ActionCatalog
         "explore_signal",
         "focus_widen",
         "emit_message",
-        "reframe_negative"
+        "reframe_negative",
+        "loop_break"
     };
 
     public static int Count => Actions.Length;

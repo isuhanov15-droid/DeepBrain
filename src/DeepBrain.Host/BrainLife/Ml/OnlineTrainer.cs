@@ -17,6 +17,11 @@ public sealed class OnlineTrainer
         _rng = rng;
     }
 
+    public void SetTrainSteps(long steps)
+    {
+        TrainSteps = Math.Max(0, steps);
+    }
+
     public TrainOutcome TryTrain(long tick, MlConfig config)
     {
         if (config.TrainEveryTicks <= 0) return TrainOutcome.None;
@@ -36,6 +41,9 @@ public sealed class OnlineTrainer
             lossSum += loss;
             TrainSteps++;
             didTrain = true;
+
+            if (config.TargetUpdateTicks > 0 && TrainSteps % config.TargetUpdateTicks == 0)
+                _net.UpdateTarget();
         }
 
         if (didTrain)

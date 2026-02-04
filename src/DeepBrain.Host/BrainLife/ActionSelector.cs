@@ -113,6 +113,9 @@ public sealed class ActionSelector
             list.Add(Make("internal", "focus_narrow", instincts.Agency * 0.7, "agency", learning));
         }
 
+        if (loop.IsLoopDetected)
+            list.Add(Make("internal", "loop_break", 0.6 + loop.LoopPenalty, "loop_break", learning));
+
         if (list.Count == 0)
             list.Add(Make("internal", "rest_short", 0.2 + (1 - homeo.Energy), "fallback", learning));
 
@@ -314,6 +317,7 @@ public sealed class ActionSelector
             "focus_widen" => actions.FocusWiden,
             "explore_signal" => actions.ExploreSignal,
             "emit_message" => emitCooldownTicks,
+            "loop_break" => 2,
             _ => 0
         };
 

@@ -64,6 +64,13 @@ public sealed class Actuator
             case "emit_message":
                 message = "seeking contact";
                 break;
+            case "loop_break":
+                affect = affect with
+                {
+                    Valence = Math.Min(1, affect.Valence + 0.02 * action.Strength),
+                    Arousal = LifeMath.Clamp01(affect.Arousal + 0.01 * action.Strength)
+                };
+                break;
         }
 
         return new OutcomeDto(action, 0.0, message);

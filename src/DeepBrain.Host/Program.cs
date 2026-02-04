@@ -93,7 +93,7 @@ try
     var brainTask = useLifeLoop && lifeLoop is not null
         ? lifeLoop.RunAsync(cts.Token)
         : RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
-    _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
+    _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, configLoader, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
 
     await Task.WhenAll(heartbeatTask, brainTask);
 }
@@ -183,6 +183,7 @@ static void RunCommandLoop(
     CancellationTokenSource cts,
     BrainEngine brain,
     LifeLoop? lifeLoop,
+    BrainConfigLoader configLoader,
     Func<bool> traceOn,
     Action<int> setTrace,
     ConsoleUiState ui,
@@ -190,7 +191,7 @@ static void RunCommandLoop(
     List<string> logBuffer,
     FileBatchWriter logWriter)
 {
-    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, mlstatus, death, exit");
+    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, resetepisode, mlstatus, reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
@@ -229,9 +230,17 @@ static void RunCommandLoop(
             case "resetml":
                 lifeLoop?.ResetMl();
                 break;
+            case "resetepisode":
+                lifeLoop?.RequestEpisodeReset();
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "episode reset requested");
+                break;
             case "mlstatus":
                 if (lifeLoop is not null)
                     LogLine(consoleLockProvider(), logBuffer, logWriter, lifeLoop.GetMlStatus());
+                break;
+            case "reloadconfig":
+                configLoader.ReloadNow();
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "config reload requested");
                 break;
             case "death":
                 brain.Stop();

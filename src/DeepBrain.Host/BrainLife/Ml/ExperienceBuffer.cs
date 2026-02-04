@@ -48,5 +48,6 @@ public readonly record struct Transition(
     int Action,
     float Reward,
     float[] NextState,
-    bool Done
+    bool Done,
+    float[] ActionMask
 );

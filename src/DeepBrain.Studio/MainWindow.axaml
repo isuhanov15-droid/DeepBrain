@@ -29,6 +29,8 @@
 							<TextBlock Name="LifeInstinctsText"/>
 							<TextBlock Name="LifeDecisionText"/>
 							<TextBlock Name="LifeRewardText"/>
+							<TextBlock Name="LifeRewardBreakdownText"/>
+							<TextBlock Name="LifeEpisodeText"/>
 							<TextBlock Name="LifeStrategyText"/>
 							<TextBlock Name="LifeDriveText"/>
 							<TextBlock Name="LifeLoopText"/>

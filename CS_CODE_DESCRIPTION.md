@@ -1,9 +1,10 @@
 ﻿# Описание кода всех *.cs файлов (полное)
 
-Дата: 2026-02-02
+Дата: 2026-02-04
 
 Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.8: суточный цикл, сон, консолидация памяти, микро‑планы, внимание, события мира, семантическая память, self-talk, throttling/инерция/затухание/регуляция, а также ML‑policy advisor и горячий конфиг.
 v0.8.1 добавляет безопасное подключение ML.Core через `ML_CORE_PATH`, stub‑режим без ML.Core и диагностику обучения.
+v0.8.2 добавляет эпизоды, декомпозицию награды, маскирование действий, усиленный loop‑detector и DQN‑обучение с target‑network.
 
 ---
 
@@ -111,7 +112,8 @@ LifeStateDto (`LifeStateDto.cs`):
 - расширения v0.3: `Policy`, `DominantDrive`, `MoodInertia`,
 - расширения v0.4: `Circadian`, `Goals`, `ActivePlan`,
 - расширения v0.5–v0.7: `Attention`, `RecentEvents`, `SemanticNotesTop`, `Character`, `Climate`, `PainSource`,
-- расширения v0.8: `ConfigVersion`, `Appraisal`, `Stats`, `Ml`.
+- расширения v0.8: `ConfigVersion`, `Appraisal`, `Stats`, `Ml`,
+- расширения v0.8.2: `Reward` (разложенная награда), `Episode` (id/tick/len/reason).
 
 EpisodeDto (`EpisodeDto.cs`):
 - `Tick`, `BeforeHomeostasis`, `AfterHomeostasis`, `Action`, `Reward`, `Ts`.
@@ -147,8 +149,16 @@ LifeStatsDto (`src/DeepBrain.Shared/BrainDtos/V6/LifeStatsDto.cs`):
 - `AnxiousPct`, `CalmPct`, `CuriousPct`, `P95Pain` — агрегаты за окно 200 тиков.
 
 MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
-- `Enabled`, `InputDim`, `ActionCount`, `NetWeight`, `Epsilon`,
-  `BufferSize`, `LastLoss`, `TrainSteps`, `AvgReward200`, `Entropy`, `PolicySource`.
+- `Enabled`, `CoreAvailable`, `InputDim`, `ActionCount`, `NetWeight`, `Epsilon`,
+  `BufferSize`, `BufferCapacity`, `LastLoss`, `AvgLoss100`, `AvgReward200`, `AvgQ`,
+  `Entropy`, `TrainSteps`, `NanSkips`, `IllegalChoiceCount`, `OverrideCount`,
+  `InvalidActionFallbackCount`, `PolicySource`.
+
+RewardDto (`src/DeepBrain.Shared/BrainDtos/V6/RewardDto.cs`):
+- `Homeostasis`, `Explore`, `Social`, `LoopPenalty`, `Total`.
+
+EpisodeInfoDto (`src/DeepBrain.Shared/BrainDtos/V6/EpisodeInfoDto.cs`):
+- `EpisodeId`, `EpisodeTick`, `EpisodeLengthTicks`, `ResetReason`.
 
 ---
 
@@ -173,9 +183,11 @@ MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
   - `trace` — вкл/выкл отображение trace в консоли;
   - `start/stop` — управляют v0.1;
   - `logs` — печатает лог‑буфер;
-  - `resetml` — сброс ML‑policy (буфер/сеть);
-  - `mlstatus` — печатает статус ML (enable, core, buffer, epsilon, netWeight, avgLoss100);
-  - `death/exit` — завершение.
+- `resetml` — сброс ML‑policy (буфер/сеть);
+- `resetepisode` — принудительный сброс эпизода;
+- `mlstatus` — печатает статус ML (enable, core, buffer, epsilon, netWeight, avgLoss100);
+- `reloadconfig` — принудительный reload `brainconfig.json` и обновление версии;
+- `death/exit` — завершение.
 
 RunBrainLoopAsync (v0.1):
 - раз в 250 мс вызывает `brain.TickWithTrace`;
@@ -349,13 +361,22 @@ HandleAsync:
 - `QuerySimilar` ищет похожие по дистанции;
 - `Consolidate` суммирует reward по действиям для сна.
 
+### src/DeepBrain.Host/BrainLife/EpisodeManager.cs
+Назначение: управление эпизодами v0.8.2.
+Поведение:
+- хранит `EpisodeId`, `EpisodeTick`, `EpisodeLengthTicks`, `LastResetReason`;
+- `Tick` инкрементирует тик эпизода и возвращает причину reset (length/manual);
+- `RequestManualReset` — запрос сброса;
+- `Reset` — переход на следующий эпизод без сброса личности/привычек.
+
 ### src/DeepBrain.Host/BrainLife/LoopDetector.cs
 Назначение: анти‑петля.
 Поведение:
 - считает `SameActionStreak`;
 - окно наград → `AvgRewardShort`;
-- `LoopPenalty` растет при петле;
-- `ResetShortTerm` очищает счетчики (используется во сне).
+- определяет `same-loop` и `alt-loop` (ABAB);
+- `LoopPenalty` растет при петле, `LoopType` хранит тип;
+- `ResetShortTerm` очищает счетчики (используется во сне/сбросе эпизода).
 
 ### src/DeepBrain.Host/BrainLife/LearningEngine.cs
 Назначение: EMA‑обучение по действиям.
@@ -368,6 +389,14 @@ HandleAsync:
 - анти‑петля штрафует повтор `LastAction`;
 - эпизодическая память добавляет бонус/штраф по действиям.
 - v0.5: добавляет Attention- и Semantic-бонусы, учитывает focus.\n- v0.6: учитывает cooldown действий.
+ - v0.8.2: добавляет `loop_break` в список кандидатов при петле.
+
+### src/DeepBrain.Host/BrainLife/ActionMasker.cs
+Назначение: формирует action‑mask (допустимость действий).
+Правила:
+- учитывает cooldown;
+- запрещает бессмысленные действия (например `rest_short` при energy≈1);
+- `loop_break` доступен только при петле.
 
 ### src/DeepBrain.Host/BrainLife/AttentionInertiaEngine.cs
 Назначение: инерция внимания, удерживает focus при слабых колебаниях.
@@ -402,6 +431,13 @@ v0.5:
 Назначение: дефолтные параметры мира/болезни/драйвов/действий/настроения/ML.
 Дополнительно v0.8.1:
 - `ml.strictRequireCore` — если true и ML.Core не найден, Host пишет ERROR и выключает ML.
+Дополнительно v0.8.2:
+- `ml.episodeLengthTicks` — длина эпизода;
+- `ml.loopWindow/loopSameK/loopAltK` — параметры детектора петли;
+- `ml.loopBreakTicks` — длительность эффекта `loop_break`;
+- `ml.targetUpdateTicks` — частота обновления target‑network;
+- `ml.epsilonMin/epsilonDecay` — epsilon‑schedule;
+- `ml.actionMasking` — включение action‑mask.
 
 ### src/DeepBrain.Host/BrainLife/AppraisalEngine.cs
 Назначение: оценивает threat/novelty/social/fatigue из мира, событий и состояния.
@@ -412,13 +448,18 @@ v0.5:
 - `BrainLife/Ml/ActionCatalog.cs` — единый список действий (string[] + index).
 - `BrainLife/Ml/StateVectorizer.cs` — стабилизированная векторизация состояния (фикс. длина).
 - `BrainLife/Ml/ExperienceBuffer.cs` — буфер переходов (FIFO).
-- `BrainLife/Ml/PolicyNetAdapter.cs` — MLP на ML.Core, предсказание Q/softmax.
-- `BrainLife/Ml/OnlineTrainer.cs` — онлайн‑обучение DQN‑lite.
+- `BrainLife/Ml/PolicyNetAdapter.cs` — MLP на ML.Core, предсказание Q/softmax + target‑network.
+- `BrainLife/Ml/OnlineTrainer.cs` — онлайн‑обучение DQN‑lite (targetUpdateTicks).
 - `BrainLife/Ml/IMlPolicyAdvisor.cs` — интерфейс советчика.
 - `BrainLife/Ml/MlPolicyAdvisor.cs` — реальная реализация (только при ML_CORE).
 - `BrainLife/Ml/MlPolicyAdvisorStub.cs` — заглушка без ML.Core.
 - `BrainLife/Ml/MlCoreAvailability.cs` — флаг наличия ML.Core.
 - `BrainLife/Ml/MlPolicyAdvisorFactory.cs` — фабрика выбора реализации.
+
+Особенности v0.8.2:
+- хранит transitions с `actionMask` и `done` (эпизоды);
+- mask предотвращает выбор недоступных действий, fallback → эвристика;
+- чекпоинт `checkpoints/brain_ml.chk` + `brain_ml.chk.net` (веса).
 
 ### Подключение ML.Core (v0.8.1)
 Сборка без ML.Core:
@@ -451,6 +492,14 @@ v0.5:
 Назначение: reward по изменению состояния.
 Формула: энергия+безопасность − (fatigue+pain)*0.5.
 
+### src/DeepBrain.Host/BrainLife/RewardCalculator.cs
+Назначение: декомпозиция награды v0.8.2.
+Компоненты:
+- `homeostasis` — базовый reward,
+- `explore`, `social` — бонусы за исследование/соц. действие,
+- `loopPenalty` — штраф петли,
+- `total` — сумма с clamp.
+
 ### src/DeepBrain.Host/BrainLife/LifeLoop.cs
 Назначение: главный цикл v0.4…v0.8.
 Шаги:
@@ -463,13 +512,17 @@ v0.5:
 4) если бодрствование:
    - `GoalResolver.Resolve`.
    - `PlanEngine.Update`.
-   - `ActionSelector.BuildCandidates` + ML‑advisor blending.
+   - `ActionSelector.BuildCandidates` + ML‑advisor blending (+ action mask).
    - `Actuator / Reward / Learning / Memory` как в v0.3.
-5) LifeState включает `Circadian`, `Goals`, `ActivePlan`, `Appraisal`, `Stats`, `Ml`, `ConfigVersion`.
-6) Диагностика:
+5) v0.8.2:
+   - `EpisodeManager` управляет эпизодами;
+   - `RewardCalculator` формирует `RewardDto`;
+   - reset по length/loop/manual, trace `episode.reset`.
+6) LifeState включает `Circadian`, `Goals`, `ActivePlan`, `Appraisal`, `Stats`, `Ml`, `ConfigVersion`, `Reward`, `Episode`.
+7) Диагностика:
    - каждые 50 тиков: phase/attention/plan/action/reward.
    - каждые 200 тиков: `STATS(200)` и `STATS_ML(200)`.
-7) Логи: `ENTER SLEEP`, `WAKE UP`, `PLAN CREATED`, `PLAN INTERRUPTED`.
+8) Логи: `ENTER SLEEP`, `WAKE UP`, `PLAN CREATED`, `PLAN INTERRUPTED`, `LOOP_DETECTED`, `EPISODE_RESET`.
 
 ---
 
@@ -486,9 +539,8 @@ v0.5:
 ### src/DeepBrain.Studio/MainWindow.axaml
 Назначение: визуальная структура.
 Блоки:
-- верхняя панель (heartbeat, host/port, connect/disconnect, статус, кнопки);
-- слева Trace (последние 50);
-- справа Life‑телеметрия + Outputs + Logs.
+‑ верхняя панель (heartbeat, host/port, connect/disconnect, статус, кнопки);
+‑ вкладки `Life / Output / Trace / Logs` для разделения выводов.
 Примечание: кнопки Start/Stop отключены — UI не управляет мозгом.
 
 ### src/DeepBrain.Studio/MainWindow.axaml.cs
@@ -505,6 +557,10 @@ Connect: ping + подписки logs/state/trace/life/output.
 - goals (id/urgency/satisfaction).
 Поля v0.8 (Life panel):
 - `configVersion`, `appraisal.*`, `stats(200)`, `ml.*` (epsilon, loss, buffer, entropy, source).
+Поля v0.8.2 (Life panel):
+- `episode` (id/tick/len/reason);
+- `reward` (tot/h/x/s/lp);
+- `ml` расширено: core, avgQ, nan, invalidActionFallback.
 
 ### src/DeepBrain.Studio/Net/TcpClientService.cs
 Назначение: TCP‑клиент.

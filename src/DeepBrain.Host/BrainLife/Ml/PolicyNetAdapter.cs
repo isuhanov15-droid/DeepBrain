@@ -8,6 +8,7 @@ namespace DeepBrain.Host.BrainLife.Ml;
 public sealed class PolicyNetAdapter
 {
     private Network _net;
+    private Network _targetNet;
     private AdamOptimizer _optimizer;
     private readonly int _inputDim;
     private readonly int _actionCount;
@@ -21,6 +22,8 @@ public sealed class PolicyNetAdapter
         _seed = seed;
         _lr = learningRate;
         (_net, _optimizer) = BuildNet(seed, learningRate);
+        _targetNet = BuildNet(seed + 101, learningRate).net;
+        CopyWeights(_net, _targetNet);
     }
 
     public int InputDim => _inputDim;
@@ -30,6 +33,15 @@ public sealed class PolicyNetAdapter
     {
         var input = ToDouble(state);
         var q = _net.Forward(input, training: false);
+        if (q.Any(v => double.IsNaN(v) || double.IsInfinity(v)))
+            return new double[_actionCount];
+        return q;
+    }
+
+    public double[] PredictTargetQ(float[] state)
+    {
+        var input = ToDouble(state);
+        var q = _targetNet.Forward(input, training: false);
         if (q.Any(v => double.IsNaN(v) || double.IsInfinity(v)))
             return new double[_actionCount];
         return q;
@@ -55,10 +67,10 @@ public sealed class PolicyNetAdapter
         foreach (var t in batch)
         {
             var q = _net.Forward(ToDouble(t.State), training: true);
-            var nextQ = _net.Forward(ToDouble(t.NextState), training: false);
+            var nextQ = _targetNet.Forward(ToDouble(t.NextState), training: false);
             if (q.Any(v => double.IsNaN(v) || double.IsInfinity(v)) || nextQ.Any(v => double.IsNaN(v) || double.IsInfinity(v)))
                 return double.NaN;
-            var maxNext = nextQ.Length == 0 ? 0 : nextQ.Max();
+            var maxNext = MaxMasked(nextQ, t.ActionMask);
             var target = t.Reward + (t.Done ? 0.0 : gamma * maxNext);
             var diff = q[t.Action] - target;
             lossSum += diff * diff;
@@ -87,6 +99,8 @@ public sealed class PolicyNetAdapter
         _seed = seed;
         _lr = learningRate;
         (_net, _optimizer) = BuildNet(seed, learningRate);
+        _targetNet = BuildNet(seed + 101, learningRate).net;
+        CopyWeights(_net, _targetNet);
     }
 
     public bool TryLoad(string path)
@@ -95,6 +109,7 @@ public sealed class PolicyNetAdapter
             return false;
 
         _net = ML.Core.Serialization.ModelStore.LoadFromFile(path);
+        _targetNet = ML.Core.Serialization.ModelStore.LoadFromFile(path);
         _optimizer = new AdamOptimizer(_lr);
         return true;
     }
@@ -103,6 +118,11 @@ public sealed class PolicyNetAdapter
     {
         if (string.IsNullOrWhiteSpace(path)) return;
         ML.Core.Serialization.ModelStore.SaveToFile(path, _net);
+    }
+
+    public void UpdateTarget()
+    {
+        CopyWeights(_net, _targetNet);
     }
 
     private (Network net, AdamOptimizer opt) BuildNet(int seed, double lr)
@@ -156,7 +176,7 @@ public sealed class PolicyNetAdapter
         return arr;
     }
 
-    private static double[] Softmax(double[] logits)
+    public static double[] Softmax(double[] logits)
     {
         if (logits.Length == 0) return Array.Empty<double>();
         var max = logits.Max();
@@ -172,6 +192,37 @@ public sealed class PolicyNetAdapter
         for (var i = 0; i < exps.Length; i++)
             exps[i] /= sum;
         return exps;
+    }
+
+    private static double MaxMasked(double[] q, float[] mask)
+    {
+        if (mask.Length != q.Length)
+            return q.Length == 0 ? 0 : q.Max();
+
+        var max = double.NegativeInfinity;
+        for (var i = 0; i < q.Length; i++)
+        {
+            if (mask[i] <= 0f) continue;
+            if (q[i] > max) max = q[i];
+        }
+
+        if (double.IsNegativeInfinity(max))
+            return q.Length == 0 ? 0 : q.Max();
+        return max;
+    }
+
+    private static void CopyWeights(Network from, Network to)
+    {
+        var src = from.Parameters().ToList();
+        var dst = to.Parameters().ToList();
+        if (src.Count != dst.Count) return;
+        for (var i = 0; i < src.Count; i++)
+        {
+            var s = src[i];
+            var d = dst[i];
+            var len = Math.Min(s.Value.Length, d.Value.Length);
+            Array.Copy(s.Value, d.Value, len);
+        }
     }
 }
 #endif

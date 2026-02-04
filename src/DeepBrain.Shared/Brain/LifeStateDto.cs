@@ -29,5 +29,7 @@ public sealed record LifeStateDto(
     string? ConfigVersion = null,
     AppraisalDto? Appraisal = null,
     LifeStatsDto? Stats = null,
-    MlPolicyDto? Ml = null
+    MlPolicyDto? Ml = null,
+    RewardDto? Reward = null,
+    EpisodeInfoDto? Episode = null
 );

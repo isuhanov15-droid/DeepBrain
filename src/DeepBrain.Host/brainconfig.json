@@ -64,11 +64,19 @@
     "trainStepsPerBatch": 1,
     "netWeightMax": 0.6,
     "netWeightWarmup": 5000,
-    "epsilonStart": 0.35,
+    "epsilonStart": 1.0,
     "epsilonEnd": 0.05,
-    "epsilonDecay": 0.999,
+    "epsilonDecay": 0.0005,
     "gradClip": 1.0,
-    "checkpointPath": "ML/Models/deepbrain-policy.json"
+    "checkpointPath": "checkpoints/brain_ml.chk",
+    "episodeLengthTicks": 1200,
+    "loopWindow": 32,
+    "loopSameK": 8,
+    "loopAltK": 6,
+    "loopBreakTicks": 20,
+    "targetUpdateTicks": 200,
+    "epsilonMin": 0.05,
+    "actionMasking": true
   },
   "useMlAdvisor": false
 }
