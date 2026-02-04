@@ -23,6 +23,8 @@ public sealed class TcpBrainServer : IAsyncDisposable
     private readonly Func<BrainInputDto, Task> _onInputSet;
     private readonly Func<string, Task> _onEventPush;
 
+    public int ClientCount => _sessions.Count;
+
     public TcpBrainServer(
         int port,
         Func<Task> onBrainStart,

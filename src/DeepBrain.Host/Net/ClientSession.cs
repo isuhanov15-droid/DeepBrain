@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Sockets;
+using System.Threading.Channels;
 using DeepBrain.Shared.Net;
 using DeepBrain.Shared.Trace;
 using DeepBrain.Shared.Brain;
@@ -21,6 +22,8 @@ public sealed class ClientSession : IAsyncDisposable
     private readonly Func<BrainInputDto, Task> _onInputSet;
     private readonly Func<string, Task> _onEventPush;
     private readonly Func<IReadOnlyList<LifeOutputDto>> _getLifeOutputs;
+    private readonly Channel<Envelope> _sendQueue = Channel.CreateUnbounded<Envelope>();
+    private Task? _sendLoop;
 
     private bool _wantsLogs;
     private bool _wantsState;
@@ -59,14 +62,14 @@ public sealed class ClientSession : IAsyncDisposable
     public async Task RunAsync(Func<string, Task> onInfo, CancellationToken ct)
     {
         await onInfo($"+ client {Remote}");
+        _sendLoop = Task.Run(() => SendLoopAsync(onInfo, ct), ct);
 
         while (!ct.IsCancellationRequested)
         {
-            const int MaxEnvelopeBytes = 1_000_000;
             Envelope? env;
             try
             {
-                env = await Framing.ReadEnvelopeAsync(_stream, MaxEnvelopeBytes, ct);
+                env = await Framing.ReadEnvelopeAsync(_stream, Framing.MaxFrameBytes, ct);
             }
             catch (Exception ex)
             {
@@ -79,6 +82,9 @@ public sealed class ClientSession : IAsyncDisposable
             await HandleAsync(env, onInfo, ct);
         }
 
+        _sendQueue.Writer.TryComplete();
+        if (_sendLoop is not null)
+            await _sendLoop;
         await onInfo($"- client {Remote}");
     }
 
@@ -87,7 +93,7 @@ public sealed class ClientSession : IAsyncDisposable
         switch (env.Type)
         {
             case Msg.Ping:
-                await SendAsync(new Envelope(Msg.Pong, Array.Empty<byte>()), ct);
+                await EnqueueAsync(new Envelope(Msg.Pong, Array.Empty<byte>()), ct);
                 break;
 
             case Msg.LogsSubscribe:
@@ -175,41 +181,62 @@ public sealed class ClientSession : IAsyncDisposable
     {
         if (!_wantsLogs) return;
         var payload = PayloadWriter.Write(new LogAppendDto(line));
-        await SendAsync(new Envelope(Msg.LogAppend, payload), ct);
+        await EnqueueAsync(new Envelope(Msg.LogAppend, payload), ct);
     }
 
     public async Task SendStateAsync(BrainStateDto state, CancellationToken ct)
     {
         if (!_wantsState) return;
         var payload = PayloadWriter.Write(state);
-        await SendAsync(new Envelope(Msg.BrainState, payload), ct);
+        await EnqueueAsync(new Envelope(Msg.BrainState, payload), ct);
     }
 
     public async Task SendLifeStateAsync(LifeStateDto state, CancellationToken ct)
     {
         if (!_wantsLifeState) return;
         var payload = PayloadWriter.Write(state);
-        await SendAsync(new Envelope(Msg.BrainLifeState, payload), ct);
+        await EnqueueAsync(new Envelope(Msg.BrainLifeState, payload), ct);
     }
 
     public async Task SendLifeOutputAsync(LifeOutputDto output, CancellationToken ct)
     {
         if (!_wantsLifeOutput) return;
         var payload = PayloadWriter.Write(output);
-        await SendAsync(new Envelope(Msg.BrainLifeOutputAppend, payload), ct);
+        await EnqueueAsync(new Envelope(Msg.BrainLifeOutputAppend, payload), ct);
     }
 
     public async Task SendTraceAsync(TraceDto trace, CancellationToken ct)
     {
         if (!_wantsTrace) return;
         var payload = PayloadWriter.Write(trace);
-        await SendAsync(new Envelope(Msg.TraceAppend, payload), ct);
+        await EnqueueAsync(new Envelope(Msg.TraceAppend, payload), ct);
     }
 
-    private Task SendAsync(Envelope env, CancellationToken ct) => Framing.WriteEnvelopeAsync(_stream, env, ct);
+    private Task EnqueueAsync(Envelope env, CancellationToken ct)
+    {
+        _sendQueue.Writer.TryWrite(env);
+        return Task.CompletedTask;
+    }
+
+    private async Task SendLoopAsync(Func<string, Task> onInfo, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var env in _sendQueue.Reader.ReadAllAsync(ct))
+            {
+                await Framing.WriteEnvelopeAsync(_stream, env, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            try { await onInfo($"SendLoop error to {Remote}: {ex.Message}"); } catch { }
+        }
+    }
 
     public ValueTask DisposeAsync()
     {
+        _sendQueue.Writer.TryComplete();
         try { _stream.Dispose(); } catch { }
         try { _client.Dispose(); } catch { }
         return ValueTask.CompletedTask;

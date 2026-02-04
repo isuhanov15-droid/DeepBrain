@@ -4,6 +4,8 @@ namespace DeepBrain.Shared.Net;
 
 public static class Framing
 {
+    public const int MaxFrameBytes = 4 * 1024 * 1024;
+
     public static async Task WriteFrameAsync(Stream stream, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         // C# 12: никакого stackalloc/Span в async
@@ -28,7 +30,7 @@ public static class Framing
             throw new EndOfStreamException("Disconnected while reading frame length.");
 
         int len = BinaryPrimitives.ReadInt32LittleEndian(lenBuf);
-        if (len < 0 || len > maxBytes)
+        if (len <= 0 || len > maxBytes)
             throw new InvalidDataException($"Frame length {len} is invalid (max {maxBytes}).");
 
         if (len == 0) return Array.Empty<byte>();
@@ -36,6 +38,11 @@ public static class Framing
         var payload = new byte[len];
         await ReadExactlyAsync(stream, payload, ct).ConfigureAwait(false);
         return payload;
+    }
+
+    public static Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken ct)
+    {
+        return ReadFrameAsync(stream, MaxFrameBytes, ct);
     }
     public static async Task WriteEnvelopeAsync(Stream stream, Envelope env, CancellationToken ct = default)
     {

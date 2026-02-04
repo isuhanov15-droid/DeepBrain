@@ -81,14 +81,33 @@ public sealed class TcpClientService : IAsyncDisposable
         {
             while (!ct.IsCancellationRequested && _stream is not null)
             {
-                var frame = await Framing.ReadFrameAsync(_stream, 10_000_000, ct);
-                if (frame is null) break;
+                var frame = await Framing.ReadFrameAsync(_stream, Framing.MaxFrameBytes, ct);
+                if (frame is null)
+                {
+                    OnInfo?.Invoke("ReadLoop: disconnected");
+                    break;
+                }
 
-                var env = JsonWire.Deserialize(frame);
+                Envelope env;
+                try
+                {
+                    env = JsonWire.Deserialize(frame);
+                }
+                catch (JsonException jex)
+                {
+                    var head = HexHead(frame, 16);
+                    OnInfo?.Invoke($"Invalid frame payload (first bytes {head}): {jex.Message}");
+                    break;
+                }
+
                 HandleIncoming(env);
             }
         }
         catch (OperationCanceledException) { }
+        catch (InvalidDataException ex)
+        {
+            OnInfo?.Invoke($"ReadLoop invalid frame: {ex.Message}");
+        }
         catch (Exception ex)
         {
             OnInfo?.Invoke($"ReadLoop error: {ex}");
@@ -96,6 +115,8 @@ public sealed class TcpClientService : IAsyncDisposable
         finally
         {
             OnInfo?.Invoke("Disconnected.");
+            if (_client is not null)
+                await DisconnectAsync();
         }
     }
 
@@ -135,6 +156,7 @@ public sealed class TcpClientService : IAsyncDisposable
                 break;
 
             case Msg.BrainLifeOutputAppend:
+                OnInfo?.Invoke($"life output received: {env.Payload?.GetType().Name ?? "null"}");
                 OnLifeOutput?.Invoke(PayloadReader.Read<LifeOutputDto>(env.Payload));
                 break;
 
@@ -148,6 +170,22 @@ public sealed class TcpClientService : IAsyncDisposable
             OnInfo?.Invoke($"HandleIncoming error: {ex.Message}");
         }
     }
+
+    private static string HexHead(byte[] data, int count)
+    {
+        if (data.Length == 0) return "empty";
+        var take = Math.Min(count, data.Length);
+        var chars = new char[take * 2];
+        for (var i = 0; i < take; i++)
+        {
+            var b = data[i];
+            chars[i * 2] = GetHex(b >> 4);
+            chars[i * 2 + 1] = GetHex(b & 0xF);
+        }
+        return new string(chars);
+    }
+
+    private static char GetHex(int v) => (char)(v < 10 ? '0' + v : 'A' + (v - 10));
 
 
     private async Task SendAsync(Envelope env, CancellationToken ct)
