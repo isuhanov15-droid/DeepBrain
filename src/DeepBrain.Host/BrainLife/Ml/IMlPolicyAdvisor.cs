@@ -12,6 +12,8 @@ public interface IMlPolicyAdvisor
     void Reset(MlConfig config);
     MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200);
     void ResetCounters();
+    bool TryConnectRemote();
+    void DisconnectRemote();
 }
 
 public readonly record struct PolicyDecision(

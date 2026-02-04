@@ -55,6 +55,14 @@
   "ml": {
     "enable": false,
     "strictRequireCore": false,
+    "backend": "local",
+    "remote": {
+      "host": "127.0.0.1",
+      "port": 7777,
+      "timeoutMs": 2000,
+      "reconnectMs": 2000
+    },
+    "remoteStrict": false,
     "seed": 1337,
     "learningRate": 0.0005,
     "gamma": 0.98,

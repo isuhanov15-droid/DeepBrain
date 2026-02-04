@@ -19,5 +19,9 @@ public sealed record MlPolicyDto(
     int OverrideCount,
     int InvalidActionFallbackCount,
     string PolicySource,
-    bool CoreAvailable
+    bool CoreAvailable,
+    string BackendKind,
+    bool RemoteConnected,
+    double RttMs,
+    string? LastRemoteError
 );

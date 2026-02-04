@@ -5,6 +5,7 @@
 Документ описывает все классы и модули проекта DeepBrain (Host / Shared / Studio) с учетом v0.8: суточный цикл, сон, консолидация памяти, микро‑планы, внимание, события мира, семантическая память, self-talk, throttling/инерция/затухание/регуляция, а также ML‑policy advisor и горячий конфиг.
 v0.8.1 добавляет безопасное подключение ML.Core через `ML_CORE_PATH`, stub‑режим без ML.Core и диагностику обучения.
 v0.8.2 добавляет эпизоды, декомпозицию награды, маскирование действий, усиленный loop‑detector и DQN‑обучение с target‑network.
+v0.8.3 добавляет ML Bridge: выбор backend (local/remote/off), интеграцию с ML.Host по TCP и расширенную телеметрию backend/remote.
 
 ---
 
@@ -152,7 +153,15 @@ MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
 - `Enabled`, `CoreAvailable`, `InputDim`, `ActionCount`, `NetWeight`, `Epsilon`,
   `BufferSize`, `BufferCapacity`, `LastLoss`, `AvgLoss100`, `AvgReward200`, `AvgQ`,
   `Entropy`, `TrainSteps`, `NanSkips`, `IllegalChoiceCount`, `OverrideCount`,
-  `InvalidActionFallbackCount`, `PolicySource`.
+  `InvalidActionFallbackCount`, `PolicySource`,
+  `BackendKind`, `RemoteConnected`, `RttMs`, `LastRemoteError`.
+
+### src/DeepBrain.Shared/MlBridge/MlBridgeDtos.cs
+Назначение: DTO для ML Bridge (remote backend).
+Содержит:
+- `MlInferRequest/Response` — инференс по одному состоянию;
+- `MlTrainRequest/Response` — обучение на одном transition (серверная буферизация);
+- `MlCheckpointRequest/Response` — save/load чекпоинта.
 
 RewardDto (`src/DeepBrain.Shared/BrainDtos/V6/RewardDto.cs`):
 - `Homeostasis`, `Explore`, `Social`, `LoopPenalty`, `Total`.
@@ -186,6 +195,7 @@ EpisodeInfoDto (`src/DeepBrain.Shared/BrainDtos/V6/EpisodeInfoDto.cs`):
 - `resetml` — сброс ML‑policy (буфер/сеть);
 - `resetepisode` — принудительный сброс эпизода;
 - `mlstatus` — печатает статус ML (enable, core, buffer, epsilon, netWeight, avgLoss100);
+- `mlconnect/mldisconnect` — ручное подключение/отключение remote backend;
 - `reloadconfig` — принудительный reload `brainconfig.json` и обновление версии;
 - `death/exit` — завершение.
 
@@ -438,6 +448,10 @@ v0.5:
 - `ml.targetUpdateTicks` — частота обновления target‑network;
 - `ml.epsilonMin/epsilonDecay` — epsilon‑schedule;
 - `ml.actionMasking` — включение action‑mask.
+Дополнительно v0.8.3:
+- `ml.backend` — `local|remote|off`;
+- `ml.remote` (host/port/timeoutMs/reconnectMs) — endpoint ML.Host;
+- `ml.remoteStrict` — при недоступности remote выключает ML.
 
 ### src/DeepBrain.Host/BrainLife/AppraisalEngine.cs
 Назначение: оценивает threat/novelty/social/fatigue из мира, событий и состояния.
@@ -451,8 +465,14 @@ v0.5:
 - `BrainLife/Ml/PolicyNetAdapter.cs` — MLP на ML.Core, предсказание Q/softmax + target‑network.
 - `BrainLife/Ml/OnlineTrainer.cs` — онлайн‑обучение DQN‑lite (targetUpdateTicks).
 - `BrainLife/Ml/IMlPolicyAdvisor.cs` — интерфейс советчика.
-- `BrainLife/Ml/MlPolicyAdvisor.cs` — реальная реализация (только при ML_CORE).
-- `BrainLife/Ml/MlPolicyAdvisorStub.cs` — заглушка без ML.Core.
+- `BrainLife/Ml/MlPolicyAdvisor.cs` — основной советчик (blending эвристик и ML).
+- `BrainLife/Ml/IBrainMlBackend.cs` — абстракция backend (local/remote/stub).
+- `BrainLife/Ml/LocalCoreBackend.cs` — local backend (ML.Core, #if ML_CORE).
+- `BrainLife/Ml/RemoteHostBackend.cs` — remote backend (ML.Host по TCP).
+- `BrainLife/Ml/StubBackend.cs` — заглушка.
+- `BrainLife/Ml/MlBackendFactory.cs` — выбор backend по config.
+- `BrainLife/Ml/MlRpcClient.cs` — RPC‑клиент к ML.Host (length‑prefix JSON).
+- `BrainLife/Ml/MlMath.cs` — общие функции (softmax/entropy/mask).
 - `BrainLife/Ml/MlCoreAvailability.cs` — флаг наличия ML.Core.
 - `BrainLife/Ml/MlPolicyAdvisorFactory.cs` — фабрика выбора реализации.
 
@@ -561,6 +581,8 @@ Connect: ping + подписки logs/state/trace/life/output.
 - `episode` (id/tick/len/reason);
 - `reward` (tot/h/x/s/lp);
 - `ml` расширено: core, avgQ, nan, invalidActionFallback.
+Поля v0.8.3 (Life panel):
+- `ml.backend`, `remoteConnected`, `rttMs`, `lastErr` (кратко в строке ml).
 
 ### src/DeepBrain.Studio/Net/TcpClientService.cs
 Назначение: TCP‑клиент.

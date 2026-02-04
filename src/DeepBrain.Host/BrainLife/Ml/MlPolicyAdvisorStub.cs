@@ -48,9 +48,15 @@ public sealed class MlPolicyAdvisorStub : IMlPolicyAdvisor
             IllegalChoiceCount: 0,
             OverrideCount: 0,
             InvalidActionFallbackCount: 0,
-            PolicySource: "heuristic"
+            PolicySource: "heuristic",
+            BackendKind: "stub",
+            RemoteConnected: false,
+            RttMs: 0,
+            LastRemoteError: null
         );
     }
 
     public void ResetCounters() { }
+    public bool TryConnectRemote() => false;
+    public void DisconnectRemote() { }
 }

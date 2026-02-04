@@ -66,6 +66,14 @@ public sealed record BrainConfig(
         new MlConfig(
             Enable: false,
             StrictRequireCore: false,
+            Backend: "local",
+            Remote: new MlRemoteConfig(
+                Host: "127.0.0.1",
+                Port: 7777,
+                TimeoutMs: 2000,
+                ReconnectMs: 2000
+            ),
+            RemoteStrict: false,
             Seed: 1337,
             LearningRate: 0.0005,
             Gamma: 0.98,
@@ -150,9 +158,19 @@ public sealed record MoodConfig(
     double TenderArousalMax
 );
 
+public sealed record MlRemoteConfig(
+    string Host,
+    int Port,
+    int TimeoutMs,
+    int ReconnectMs
+);
+
 public sealed record MlConfig(
     bool Enable,
     bool StrictRequireCore,
+    string Backend,
+    MlRemoteConfig Remote,
+    bool RemoteStrict,
     int Seed,
     double LearningRate,
     double Gamma,

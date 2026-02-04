@@ -195,7 +195,7 @@ static void RunCommandLoop(
     List<string> logBuffer,
     FileBatchWriter logWriter)
 {
-    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, resetepisode, mlstatus, reloadconfig, death, exit");
+    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, resetepisode, mlstatus, mlconnect, mldisconnect, reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
@@ -241,6 +241,17 @@ static void RunCommandLoop(
             case "mlstatus":
                 if (lifeLoop is not null)
                     LogLine(consoleLockProvider(), logBuffer, logWriter, lifeLoop.GetMlStatus());
+                break;
+            case "mlconnect":
+                if (lifeLoop is not null)
+                {
+                    var ok = lifeLoop.TryConnectMl();
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, ok ? "ml remote connected" : "ml remote connect failed");
+                }
+                break;
+            case "mldisconnect":
+                lifeLoop?.DisconnectMl();
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "ml remote disconnected");
                 break;
             case "reloadconfig":
                 configLoader.ReloadNow();

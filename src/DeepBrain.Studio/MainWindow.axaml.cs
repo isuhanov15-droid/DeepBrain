@@ -253,7 +253,8 @@ public partial class MainWindow : Window
         if (state.Ml is not null)
         {
             var loops = policy?.LoopCount ?? 0;
-            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} core:{state.Ml.CoreAvailable} w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000} q:{state.Ml.AvgQ:0.000} buf:{state.Ml.BufferSize} steps:{state.Ml.TrainSteps} nan:{state.Ml.NanSkips} inv:{state.Ml.InvalidActionFallbackCount} loops:{loops}";
+            var err = string.IsNullOrWhiteSpace(state.Ml.LastRemoteError) ? "" : $" err:{state.Ml.LastRemoteError}";
+            LifeMlText.Text = $"ml=on:{state.Ml.Enabled} backend:{state.Ml.BackendKind} remote:{state.Ml.RemoteConnected} rtt:{state.Ml.RttMs:0}ms w:{state.Ml.NetWeight:0.00} eps:{state.Ml.Epsilon:0.000} loss:{state.Ml.LastLoss:0.000} q:{state.Ml.AvgQ:0.000} buf:{state.Ml.BufferSize} steps:{state.Ml.TrainSteps} nan:{state.Ml.NanSkips} inv:{state.Ml.InvalidActionFallbackCount} loops:{loops}{err}";
         }
         else
         {

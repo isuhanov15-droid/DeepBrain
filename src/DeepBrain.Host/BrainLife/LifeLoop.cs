@@ -145,11 +145,15 @@ public sealed class LifeLoop
     {
         var (cfg, _) = _configLoader.GetCurrent();
         var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
-        if (!MlCoreAvailability.IsAvailable)
+        var backendKind = (mlCfg.Backend ?? "off").Trim().ToLowerInvariant();
+        if (backendKind == "local" && !MlCoreAvailability.IsAvailable)
             mlCfg = mlCfg with { Enable = false };
         var t = _ml.BuildTelemetry(mlCfg.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200);
-        return $"ml.enable={mlCfg.Enable} core={(MlCoreAvailability.IsAvailable ? "found" : "missing")} buf={t.BufferSize}/{t.BufferCapacity} eps={t.Epsilon:0.000} w={t.NetWeight:0.00} avgLoss100={t.AvgLoss100:0.000}";
+        return $"ml.enable={mlCfg.Enable} backend={t.BackendKind} core={(MlCoreAvailability.IsAvailable ? "found" : "missing")} remote={t.RemoteConnected} rtt={t.RttMs:0}ms buf={t.BufferSize}/{t.BufferCapacity} eps={t.Epsilon:0.000} w={t.NetWeight:0.00} avgLoss100={t.AvgLoss100:0.000}";
     }
+
+    public bool TryConnectMl() => _ml.TryConnectRemote();
+    public void DisconnectMl() => _ml.DisconnectRemote();
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -181,7 +185,10 @@ public sealed class LifeLoop
         var mlConfig = config.Ml with { Enable = config.Ml.Enable || config.UseMlAdvisor };
         _episode.Configure(mlConfig.EpisodeLengthTicks);
         _loop.Configure(mlConfig.LoopWindow, mlConfig.LoopSameK, mlConfig.LoopAltK);
-        if (!MlCoreAvailability.IsAvailable)
+        var backendKind = (mlConfig.Backend ?? "off").Trim().ToLowerInvariant();
+        if (backendKind == "off")
+            mlConfig = mlConfig with { Enable = false };
+        if (backendKind == "local" && !MlCoreAvailability.IsAvailable)
         {
             if (!_mlCoreMissingLogged)
             {
@@ -192,6 +199,15 @@ public sealed class LifeLoop
                 _mlCoreMissingLogged = true;
             }
             mlConfig = mlConfig with { Enable = false };
+        }
+        if (backendKind == "remote" && mlConfig.Enable)
+        {
+            var connected = _ml.TryConnectRemote();
+            if (!connected && mlConfig.RemoteStrict)
+            {
+                _log("ERROR: ML remote unavailable, ml.enable forced false");
+                mlConfig = mlConfig with { Enable = false };
+            }
         }
         if (mlConfig.Enable && !_mlLoaded)
         {
