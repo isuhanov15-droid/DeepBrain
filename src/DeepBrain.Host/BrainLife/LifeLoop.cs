@@ -47,6 +47,10 @@ public sealed class LifeLoop
     private readonly CalmBaselineEngine _calmBaseline = new();
     private readonly AppraisalEngine _appraisal = new();
     private readonly ActionMasker _masker = new();
+    private readonly CurriculumManager _curriculum;
+    private readonly ScenarioScorer _scenarioScorer = new();
+    private readonly PolicyEvaluator _policyEvaluator;
+    private readonly EpisodeReportWriter _reportWriter = new();
     private readonly IMlPolicyAdvisor _ml;
     private readonly Dictionary<string, int> _actionCounts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _eventCounts = new(StringComparer.Ordinal);
@@ -67,6 +71,28 @@ public sealed class LifeLoop
     private double _sumThreatFocus;
     private int _painClampedCount;
     private readonly List<double> _painSamples = new(256);
+    private DateTimeOffset _episodeStartTs = DateTimeOffset.Now;
+    private int _episodeSteps;
+    private double _episodeRewardSum;
+    private RewardDto _episodeRewardBreakdown = new(0, 0, 0, 0, 0, 0);
+    private readonly Dictionary<string, int> _episodeActionCounts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _episodeMoodCounts = new(StringComparer.OrdinalIgnoreCase);
+    private int _episodeLoopCount;
+    private bool _episodeLoopActive;
+    private double _episodeMaxLoopStrength;
+    private double _episodeSumPain;
+    private double _episodeMaxPain;
+    private double _episodeSumSafety;
+    private double _episodeSumArousal;
+    private int _episodeSocialSignals;
+    private int _episodeSelfTalkCount;
+    private int _episodeMaskFallbackCount;
+    private int _episodeInvalidActionCount;
+    private bool _episodeMlUsed;
+    private double _episodeLastEpsilon;
+    private string _mlModeOverride = "";
+    private int _trainingEpisodeCount;
+    private int _evalEpisodeCount;
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
     private LifeStatsDto _statsSnapshot = new(0, 0, 0, 0);
@@ -83,6 +109,10 @@ public sealed class LifeLoop
     private double _agencyOffset;
     private string? _outputSinceDiag;
     private int _loopBreakTicks;
+    private string _scenarioName = "calm_baseline";
+    private string _curriculumMode = "fixed";
+    private int _scenarioIndex;
+    private string _curriculumModeOverride = "";
 
     private readonly List<EpisodeDto> _episodes = new(512);
     private const int EpisodeCapacity = 512;
@@ -120,6 +150,8 @@ public sealed class LifeLoop
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
         _episode = new EpisodeManager(cfg.Episode.MaxSteps);
+        _curriculum = new CurriculumManager(cfg.Ml.Seed);
+        _policyEvaluator = new PolicyEvaluator(_scenarioScorer);
         _ml = MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
     }
 
@@ -142,13 +174,35 @@ public sealed class LifeLoop
         _episode.RequestManualReset();
     }
 
+    public IReadOnlyList<string> ListScenarios() => _curriculum.ListScenarios();
+
+    public bool TrySetScenario(string name) => _curriculum.TrySetScenario(name);
+
+    public void SetCurriculumMode(string mode)
+    {
+        _curriculumModeOverride = mode?.Trim().ToLowerInvariant() ?? "";
+        _curriculum.SetMode(_curriculumModeOverride);
+    }
+
+    public void NextScenario()
+    {
+        _curriculum.Advance(double.PositiveInfinity);
+    }
+
+    public void SetMlMode(string mode)
+    {
+        _mlModeOverride = mode?.Trim().ToLowerInvariant() ?? "";
+    }
+
     public string GetMlStatus()
     {
         var (cfg, _) = _configLoader.GetCurrent();
         var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
         var backendKind = (mlCfg.Backend ?? "off").Trim().ToLowerInvariant();
         var (enabled, reason) = ComputeMlEnabled(mlCfg, backendKind, mlCfg.RemoteStrict, _ml.TryConnectRemote());
-        var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason);
+        var mlMode = ResolveMlMode(mlCfg);
+        var trainEnabled = mlMode != "evaluation" && enabled;
+        var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount);
         return $"enable={enabled} backendKind={t.BackendKind} coreAvailable={t.CoreAvailable} remoteConnected={t.RemoteConnected} rttMs={t.RttMs:0} lastError={t.LastRemoteError ?? "n/a"} reasonIfDisabled={reason ?? "n/a"}";
     }
 
@@ -202,8 +256,27 @@ public sealed class LifeLoop
         var beforeAffect = _affect;
         var (config, version) = _configLoader.GetCurrent();
         _configVersion = version;
+        var curriculumCfg = config.Curriculum ?? BrainConfig.Default.Curriculum;
+        var evalCfg = config.Evaluation ?? BrainConfig.Default.Evaluation;
+        var scenarioCfg = config.Scenarios ?? BrainConfig.Default.Scenarios;
+        if (!string.IsNullOrWhiteSpace(_curriculumModeOverride))
+            curriculumCfg = curriculumCfg with { Mode = _curriculumModeOverride };
+        _curriculum.Configure(curriculumCfg, scenarioCfg);
+        _policyEvaluator.Configure(evalCfg);
+        var scenario = _curriculum.GetScenario();
+        _scenarioName = scenario.Name;
+        _curriculumMode = _curriculum.Mode;
+        _scenarioIndex = _curriculum.ScenarioIndex;
+        var worldConfig = scenario.Apply(config.World);
+
         var mlConfig = config.Ml with { Enable = config.Ml.Enable || config.UseMlAdvisor };
-        _episode.Configure(config.Episode);
+        var mlMode = ResolveMlMode(mlConfig);
+        var trainEnabled = mlMode != "evaluation";
+        var mlConfigEffective = trainEnabled
+            ? mlConfig
+            : mlConfig with { EpsilonStart = 0, EpsilonEnd = 0, EpsilonMin = 0, EpsilonDecay = 0, TrainEveryTicks = int.MaxValue, TrainStepsPerBatch = 0 };
+
+        _episode.Configure(config.Episode, scenario.EpisodeLengthMultiplier);
         _loop.Configure(mlConfig.LoopWindow, mlConfig.LoopSameK, mlConfig.LoopAltK);
         var backendKind = (mlConfig.Backend ?? "off").Trim().ToLowerInvariant();
         var remoteConnected = backendKind == "remote" && _ml.TryConnectRemote();
@@ -214,6 +287,10 @@ public sealed class LifeLoop
             _mlCoreMissingLogged = true;
         }
         mlConfig = mlConfig with { Enable = mlEnabled };
+        trainEnabled = trainEnabled && mlEnabled;
+        mlConfigEffective = trainEnabled
+            ? mlConfig
+            : mlConfig with { EpsilonStart = 0, EpsilonEnd = 0, EpsilonMin = 0, EpsilonDecay = 0, TrainEveryTicks = int.MaxValue, TrainStepsPerBatch = 0 };
         if (mlConfig.Enable && !_mlLoaded)
         {
             if (_ml.TryLoad(mlConfig.CheckpointPath, out var loadedEpisodeId))
@@ -254,6 +331,13 @@ public sealed class LifeLoop
             }
 
             var circadian = _clock.Snapshot(true);
+            var sleepScenarioInfo = new DeepBrain.Shared.BrainDtos.V6.ScenarioInfoDto(
+                _scenarioName,
+                _curriculumMode,
+                _scenarioIndex
+            );
+            var sleepEvalSnapshot = _policyEvaluator.Snapshot(mlMode == "evaluation");
+            var sleepEvalDto = ToEvaluationDto(sleepEvalSnapshot);
             var stateSleep = new LifeStateDto(
                 _tick,
                 DateTimeOffset.Now,
@@ -286,14 +370,16 @@ public sealed class LifeLoop
                 _configVersion,
                 null,
                 _statsSnapshot,
-                _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, disableReason),
+                _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, disableReason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount),
                 null,
                 new DeepBrain.Shared.BrainDtos.V6.EpisodeInfoDto(
                     _episode.EpisodeId,
                     _episode.EpisodeTick,
                     _episode.EpisodeLengthTicks,
                     "none"
-                )
+                ),
+                sleepScenarioInfo,
+                sleepEvalDto
             );
             _broadcast(stateSleep, ct);
             _tick++;
@@ -302,7 +388,7 @@ public sealed class LifeLoop
 
         var circ = _clock.Snapshot(false);
         var preInstincts = _instincts.Compute(_homeo, _world, config.Drives);
-        var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping, dtSeconds, preInstincts.Attachment, config.World);
+        var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping, dtSeconds, preInstincts.Attachment, worldConfig);
         foreach (var ev in newEvents)
             _log($"EVENT: {ev.Type} {ev.Severity:0.00} {ev.Payload}");
         foreach (var ev in newEvents)
@@ -405,7 +491,7 @@ public sealed class LifeLoop
             maskFallback = true;
         }
 
-        var allowedActions = mlConfig.ActionMasking
+        var allowedActions = mlConfigEffective.ActionMasking
             ? ActionCatalog.Actions.Where((_, i) => i < actionMask.Length && actionMask[i] > 0).ToList()
             : candidates.Select(c => c.Action.Name).Distinct().ToList();
         var heuristicScores = ActionCatalog.Actions.ToDictionary(a => a, _ => double.NegativeInfinity, StringComparer.Ordinal);
@@ -415,7 +501,7 @@ public sealed class LifeLoop
                 heuristicScores[c.Action.Name] = Math.Max(current, c.Score);
         }
 
-        var stateVec = mlConfig.Enable
+        var stateVec = mlConfigEffective.Enable
             ? _ml.Encode(new StateVectorInput(
                 _homeo,
                 instincts,
@@ -433,7 +519,7 @@ public sealed class LifeLoop
             ))
             : Array.Empty<float>();
 
-        var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, actionMask, mlConfig, _tick);
+        var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, actionMask, mlConfigEffective, _tick);
         var chosen = candidates.FirstOrDefault(c => c.Action.Name == decision.ActionName) ?? ActionSelector.PickBest(candidates);
         var action = chosen.Action;
         var maskStatus = maskFallback ? "fallback" : "ok";
@@ -464,6 +550,7 @@ public sealed class LifeLoop
         _learning.Update(action.Name, rewardDto.Total);
         _cooldowns.Mark(action.Name, _tick);
         UpdateStats(action.Name, _affect.Mood, _homeo, attention, rewardDto.Total);
+        UpdateEpisodeMetrics(action, _affect.Mood, rewardDto, _loop.IsLoopDetected, _loop.LoopStrength, _homeo, maskFallback, invalidAction, decision.UsedMl, decision.Epsilon);
 
         if (_loop.IsLoopDetected && _loop.ShouldAnnounceLoop(_tick))
         {
@@ -477,7 +564,7 @@ public sealed class LifeLoop
             ? episodeResetReason!
             : "none";
 
-        if (mlConfig.Enable && stateVec.Length > 0)
+        if (trainEnabled && stateVec.Length > 0)
         {
             var nextInstincts = _instincts.Compute(_homeo, _world, config.Drives);
             var nextAppraisal = _appraisal.Compute(_homeo, nextInstincts, _world, circ, recentEvents);
@@ -499,7 +586,7 @@ public sealed class LifeLoop
             var actionIdx = ActionCatalog.IndexOf(action.Name);
             var nextMask = _masker.BuildMask(_homeo, _affect, _cooldowns, _tick + 1, emitCooldown, config.Actions, _loop.IsLoopDetected);
             var done = resetReason != "none";
-            _ml.Observe(stateVec, actionIdx, (float)rewardDto.Total, nextVec, done, nextMask, mlConfig, _tick);
+            _ml.Observe(stateVec, actionIdx, (float)rewardDto.Total, nextVec, done, nextMask, mlConfigEffective, _tick);
         }
 
         if (action.Name == "loop_break")
@@ -572,9 +659,9 @@ public sealed class LifeLoop
             _loop.AvgRewardShort
         );
 
-        var mlTelemetry = _ml.BuildTelemetry(mlConfig.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, disableReason);
+        var mlTelemetry = _ml.BuildTelemetry(mlConfigEffective.Enable, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, disableReason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount);
         _mlTelemetry = mlTelemetry;
-        if (mlConfig.Enable && _tick % 200 == 0)
+        if (trainEnabled && _tick % 200 == 0)
             EmitTrace("ml.train", new { step = mlTelemetry.TrainSteps, loss = mlTelemetry.LastLoss }, ct);
 
         var emitRemaining = Math.Max(0, emitCooldown - (int)(_tick - _cooldowns.GetLastTick("emit_message")));
@@ -584,6 +671,13 @@ public sealed class LifeLoop
             _episode.EpisodeLengthTicks,
             resetReason
         );
+        var scenarioInfo = new DeepBrain.Shared.BrainDtos.V6.ScenarioInfoDto(
+            _scenarioName,
+            _curriculumMode,
+            _scenarioIndex
+        );
+        var evalSnapshot = _policyEvaluator.Snapshot(mlMode == "evaluation");
+        var evalDto = ToEvaluationDto(evalSnapshot);
         var state = new LifeStateDto(
             _tick,
             DateTimeOffset.Now,
@@ -618,7 +712,9 @@ public sealed class LifeLoop
             _statsSnapshot,
             mlTelemetry,
             rewardDto,
-            episodeInfo
+            episodeInfo,
+            scenarioInfo,
+            evalDto
         );
 
         var episode = new EpisodeDto(
@@ -641,6 +737,18 @@ public sealed class LifeLoop
 
         if (resetReason != "none")
         {
+            var backend = mlTelemetry.BackendKind;
+            var report = BuildEpisodeReport(resetReason, _scenarioName, backend);
+            if (evalCfg.SaveReports)
+                _reportWriter.Write(report);
+            _policyEvaluator.Add(report, mlMode == "evaluation");
+            if (mlMode == "evaluation")
+                _evalEpisodeCount++;
+            else
+                _trainingEpisodeCount++;
+            var gateReward = _policyEvaluator.Snapshot(mlMode == "evaluation").MeanReward;
+            if (_curriculum.Advance(gateReward))
+                _log($"SCENARIO_NEXT name={_curriculum.ScenarioName} idx={_curriculum.ScenarioIndex} mode={_curriculum.Mode}");
             ResetEpisode(resetReason);
             _log($"EPISODE_RESET reason={resetReason} id={_episode.EpisodeId}");
             EmitTrace("episode.reset", new { reason = resetReason, episodeId = _episode.EpisodeId }, ct);
@@ -683,6 +791,7 @@ public sealed class LifeLoop
             _log($"SELF TALK: {selfTalk}");
             EmitTrace("selftalk", new { text = selfTalk }, ct);
             _output(new LifeOutputDto(_tick, DateTimeOffset.Now, selfTalk, "selftalk"), ct);
+            _episodeSelfTalkCount++;
         }
 
         var habitUpdated = _habits.UpdateAfter(action.Name, rewardDto.Total, cueKey, _tick);
@@ -827,6 +936,8 @@ public sealed class LifeLoop
         _cooldowns.ResetAll();
         _loop.ResetShortTerm();
         _world.ResetEpisode();
+        ResetEpisodeMetrics();
+        _episodeStartTs = DateTimeOffset.Now;
         _statsTicks = 0;
         _sumPain = 0;
         _sumSafety = 0;
@@ -869,6 +980,139 @@ public sealed class LifeLoop
         _actionCounts[actionName] = _actionCounts.TryGetValue(actionName, out var count) ? count + 1 : 1;
         _avgReward200 = _statsTicks > 0 ? _sumReward / _statsTicks : 0;
         _statsSnapshot = BuildStatsSnapshot();
+    }
+
+    private void UpdateEpisodeMetrics(ActionDto action, string mood, RewardDto reward, bool loopDetected, double loopStrength, HomeostasisDto homeo, bool maskFallback, bool invalidAction, bool usedMl, double epsilon)
+    {
+        _episodeSteps++;
+        _episodeRewardSum += reward.Total;
+        _episodeRewardBreakdown = new RewardDto(
+            _episodeRewardBreakdown.Homeostasis + reward.Homeostasis,
+            _episodeRewardBreakdown.Explore + reward.Explore,
+            _episodeRewardBreakdown.Social + reward.Social,
+            _episodeRewardBreakdown.LoopPenalty + reward.LoopPenalty,
+            _episodeRewardBreakdown.InvalidActionPenalty + reward.InvalidActionPenalty,
+            _episodeRewardBreakdown.Total + reward.Total
+        );
+
+        _episodeActionCounts[action.Name] = _episodeActionCounts.TryGetValue(action.Name, out var count) ? count + 1 : 1;
+        _episodeMoodCounts[mood] = _episodeMoodCounts.TryGetValue(mood, out var mcount) ? mcount + 1 : 1;
+
+        if (loopDetected && !_episodeLoopActive)
+        {
+            _episodeLoopCount++;
+            _episodeLoopActive = true;
+        }
+        if (!loopDetected)
+            _episodeLoopActive = false;
+        _episodeMaxLoopStrength = Math.Max(_episodeMaxLoopStrength, loopStrength);
+
+        _episodeSumPain += homeo.Pain;
+        _episodeMaxPain = Math.Max(_episodeMaxPain, homeo.Pain);
+        _episodeSumSafety += homeo.Safety;
+        _episodeSumArousal += homeo.Arousal;
+
+        if (action.Name == "emit_message")
+            _episodeSocialSignals++;
+        if (maskFallback)
+            _episodeMaskFallbackCount++;
+        if (invalidAction)
+            _episodeInvalidActionCount++;
+        if (usedMl)
+            _episodeMlUsed = true;
+        _episodeLastEpsilon = epsilon;
+    }
+
+    private void ResetEpisodeMetrics()
+    {
+        _episodeSteps = 0;
+        _episodeRewardSum = 0;
+        _episodeRewardBreakdown = new RewardDto(0, 0, 0, 0, 0, 0);
+        _episodeActionCounts.Clear();
+        _episodeMoodCounts.Clear();
+        _episodeLoopCount = 0;
+        _episodeLoopActive = false;
+        _episodeMaxLoopStrength = 0;
+        _episodeSumPain = 0;
+        _episodeMaxPain = 0;
+        _episodeSumSafety = 0;
+        _episodeSumArousal = 0;
+        _episodeSocialSignals = 0;
+        _episodeSelfTalkCount = 0;
+        _episodeMaskFallbackCount = 0;
+        _episodeInvalidActionCount = 0;
+        _episodeMlUsed = false;
+        _episodeLastEpsilon = 0;
+    }
+
+    private EpisodeReport BuildEpisodeReport(string reason, string scenarioName, string backendKind)
+    {
+        var steps = Math.Max(1, _episodeSteps);
+        var rewardAvg = new RewardDto(
+            _episodeRewardBreakdown.Homeostasis / steps,
+            _episodeRewardBreakdown.Explore / steps,
+            _episodeRewardBreakdown.Social / steps,
+            _episodeRewardBreakdown.LoopPenalty / steps,
+            _episodeRewardBreakdown.InvalidActionPenalty / steps,
+            _episodeRewardBreakdown.Total / steps
+        );
+
+        var report = new EpisodeReport(
+            EpisodeId: _episode.EpisodeId,
+            ScenarioName: scenarioName,
+            StartTs: _episodeStartTs,
+            EndTs: DateTimeOffset.Now,
+            Steps: steps,
+            EndReason: reason,
+            AvgReward: _episodeRewardSum / steps,
+            TotalReward: _episodeRewardSum,
+            RewardBreakdownAvg: rewardAvg,
+            ActionHistogram: new Dictionary<string, int>(_episodeActionCounts, StringComparer.Ordinal),
+            LoopCount: _episodeLoopCount,
+            MaxLoopStrength: _episodeMaxLoopStrength,
+            MoodDistribution: new Dictionary<string, int>(_episodeMoodCounts, StringComparer.OrdinalIgnoreCase),
+            AvgPain: _episodeSumPain / steps,
+            MaxPain: _episodeMaxPain,
+            AvgSafety: _episodeSumSafety / steps,
+            AvgArousal: _episodeSumArousal / steps,
+            SocialSignalsSent: _episodeSocialSignals,
+            SelfTalkCount: _episodeSelfTalkCount,
+            MaskFallbackCount: _episodeMaskFallbackCount,
+            InvalidActionCount: _episodeInvalidActionCount,
+            MlUsed: _episodeMlUsed,
+            BackendKind: backendKind,
+            EpsilonUsed: _episodeLastEpsilon,
+            ScenarioScore: null
+        );
+
+        var score = _scenarioScorer.Score(scenarioName, report);
+        return report with { ScenarioScore = score };
+    }
+
+    private static DeepBrain.Shared.BrainDtos.V6.EvaluationSnapshotDto ToEvaluationDto(EvaluationSnapshot snapshot)
+    {
+        return new DeepBrain.Shared.BrainDtos.V6.EvaluationSnapshotDto(
+            snapshot.MeanReward,
+            snapshot.MedianReward,
+            snapshot.SuccessRate,
+            snapshot.AvgEpisodeLength,
+            snapshot.LoopRate,
+            snapshot.ActionDiversity,
+            snapshot.CalmRatio,
+            snapshot.AnxiousRatio,
+            snapshot.CuriousRatio,
+            snapshot.InvalidActionRate,
+            snapshot.MaskFallbackRate,
+            snapshot.EpisodeCount
+        );
+    }
+
+    private string ResolveMlMode(MlConfig config)
+    {
+        var mode = string.IsNullOrWhiteSpace(_mlModeOverride) ? config.Mode : _mlModeOverride;
+        if (string.IsNullOrWhiteSpace(mode)) return "training";
+        mode = mode.Trim().ToLowerInvariant();
+        return mode is "evaluation" or "training" ? mode : "training";
     }
 
     private LifeStatsDto BuildStatsSnapshot()

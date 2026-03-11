@@ -17,6 +17,8 @@ public sealed class WorldSim
     public double ShockChanceBase { get; private set; } = 0.01;
     public double MicroThreatChanceBase { get; private set; } = 0.03;
     public double NoveltyChanceBase { get; private set; } = 0.02;
+    public double SocialPingChanceBase { get; private set; } = 0.04;
+    public double FatigueWaveChanceBase { get; private set; } = 0.02;
     public double CalmWindowChanceBase { get; private set; } = 0.02;
     public double BaselineThreat { get; private set; } = 0.10;
     public double ThreatReturnRatePerSec { get; private set; } = 0.06;
@@ -68,10 +70,10 @@ public sealed class WorldSim
         if (_rng.NextDouble() < noveltyChance)
             newEvents.Add(MakeEvent(tick, "novelty_opportunity", 0.4 + _rng.NextDouble() * 0.2, "new pattern"));
 
-        if ((phase == "evening" || phase == "night") && attachmentLevel > 0.2 && _rng.NextDouble() < 0.04)
+        if ((phase == "evening" || phase == "night") && attachmentLevel > 0.2 && _rng.NextDouble() < SocialPingChanceBase)
             newEvents.Add(MakeEvent(tick, "social_ping", 0.4 + _rng.NextDouble() * 0.2, "call from distance"));
 
-        if (phase == "active" && sleepPressure > 0.5 && _rng.NextDouble() < (0.02 + StressLevel * 0.03))
+        if (phase == "active" && sleepPressure > 0.5 && _rng.NextDouble() < (FatigueWaveChanceBase + StressLevel * 0.03))
             newEvents.Add(MakeEvent(tick, "fatigue_wave", 0.45 + _rng.NextDouble() * 0.2, "energy dip"));
 
         if (CalmLevel > 0.6 && _rng.NextDouble() < (CalmWindowChanceBase + CalmLevel * 0.03))
@@ -159,6 +161,8 @@ public sealed class WorldSim
         ShockChanceBase = config.ShockChanceBase;
         MicroThreatChanceBase = config.MicroThreatChanceBase;
         NoveltyChanceBase = config.NoveltyChanceBase;
+        SocialPingChanceBase = config.SocialPingChanceBase;
+        FatigueWaveChanceBase = config.FatigueWaveChanceBase;
         CalmWindowChanceBase = config.CalmWindowChanceBase;
         DriftRatePerSec = config.DriftRatePerSec;
         BaselineTension = config.BaselineTension;

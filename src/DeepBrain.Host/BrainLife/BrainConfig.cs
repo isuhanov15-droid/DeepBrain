@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace DeepBrain.Host.BrainLife;
 
 public sealed record BrainConfig(
@@ -9,6 +11,9 @@ public sealed record BrainConfig(
     RewardConfig Reward,
     EpisodeConfig Episode,
     MlConfig Ml,
+    CurriculumConfig Curriculum,
+    EvaluationConfig Evaluation,
+    Dictionary<string, ScenarioConfig> Scenarios,
     bool UseMlAdvisor = false)
 {
     public static BrainConfig Default => new(
@@ -18,6 +23,8 @@ public sealed record BrainConfig(
             ShockChanceBase: 0.01,
             MicroThreatChanceBase: 0.03,
             NoveltyChanceBase: 0.02,
+            SocialPingChanceBase: 0.04,
+            FatigueWaveChanceBase: 0.02,
             CalmWindowChanceBase: 0.02,
             DriftRatePerSec: 0.02,
             BaselineTension: 0.25
@@ -94,6 +101,7 @@ public sealed record BrainConfig(
             ),
             RemoteStrict: false,
             LogBackendSwitches: true,
+            Mode: "training",
             Seed: 1337,
             LearningRate: 0.0005,
             Gamma: 0.98,
@@ -116,7 +124,84 @@ public sealed record BrainConfig(
             TargetUpdateTicks: 200,
             EpsilonMin: 0.05,
             ActionMasking: true
-        )
+        ),
+        new CurriculumConfig(
+            Mode: "round_robin",
+            RewardGateThreshold: 0.05
+        ),
+        new EvaluationConfig(
+            WindowEpisodes: 20,
+            SaveReports: true
+        ),
+        new Dictionary<string, ScenarioConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["calm_baseline"] = new ScenarioConfig(
+                BaselineThreat: 0.08,
+                BaselineTension: 0.20,
+                NoveltyChance: 0.02,
+                SocialPingChance: 0.03,
+                FatigueWaveChance: 0.02,
+                CalmWindowChance: 0.03,
+                DriftRate: 0.015,
+                ShockChance: 0.006,
+                EpisodeLengthMultiplier: 1.0
+            ),
+            ["novelty_walk"] = new ScenarioConfig(
+                BaselineThreat: 0.08,
+                BaselineTension: 0.22,
+                NoveltyChance: 0.05,
+                SocialPingChance: 0.02,
+                FatigueWaveChance: 0.02,
+                CalmWindowChance: 0.04,
+                DriftRate: 0.02,
+                ShockChance: 0.006,
+                EpisodeLengthMultiplier: 1.0
+            ),
+            ["threat_pulses"] = new ScenarioConfig(
+                BaselineThreat: 0.16,
+                BaselineTension: 0.35,
+                NoveltyChance: 0.02,
+                SocialPingChance: 0.02,
+                FatigueWaveChance: 0.03,
+                CalmWindowChance: 0.015,
+                DriftRate: 0.025,
+                ShockChance: 0.02,
+                EpisodeLengthMultiplier: 1.0
+            ),
+            ["social_pull"] = new ScenarioConfig(
+                BaselineThreat: 0.10,
+                BaselineTension: 0.24,
+                NoveltyChance: 0.02,
+                SocialPingChance: 0.06,
+                FatigueWaveChance: 0.02,
+                CalmWindowChance: 0.03,
+                DriftRate: 0.02,
+                ShockChance: 0.008,
+                EpisodeLengthMultiplier: 1.0
+            ),
+            ["fatigue_day"] = new ScenarioConfig(
+                BaselineThreat: 0.10,
+                BaselineTension: 0.28,
+                NoveltyChance: 0.02,
+                SocialPingChance: 0.03,
+                FatigueWaveChance: 0.05,
+                CalmWindowChance: 0.02,
+                DriftRate: 0.02,
+                ShockChance: 0.01,
+                EpisodeLengthMultiplier: 1.0
+            ),
+            ["mixed_adaptive"] = new ScenarioConfig(
+                BaselineThreat: 0.10,
+                BaselineTension: 0.25,
+                NoveltyChance: 0.03,
+                SocialPingChance: 0.04,
+                FatigueWaveChance: 0.03,
+                CalmWindowChance: 0.03,
+                DriftRate: 0.02,
+                ShockChance: 0.012,
+                EpisodeLengthMultiplier: 1.0
+            )
+        }
     );
 }
 
@@ -126,6 +211,8 @@ public sealed record WorldConfig(
     double ShockChanceBase,
     double MicroThreatChanceBase,
     double NoveltyChanceBase,
+    double SocialPingChanceBase,
+    double FatigueWaveChanceBase,
     double CalmWindowChanceBase,
     double DriftRatePerSec,
     double BaselineTension
@@ -211,6 +298,7 @@ public sealed record MlConfig(
     MlRemoteConfig Remote,
     bool RemoteStrict,
     bool LogBackendSwitches,
+    string Mode,
     int Seed,
     double LearningRate,
     double Gamma,
@@ -233,4 +321,26 @@ public sealed record MlConfig(
     int TargetUpdateTicks,
     double EpsilonMin,
     bool ActionMasking
+);
+
+public sealed record CurriculumConfig(
+    string Mode,
+    double RewardGateThreshold
+);
+
+public sealed record EvaluationConfig(
+    int WindowEpisodes,
+    bool SaveReports
+);
+
+public sealed record ScenarioConfig(
+    double BaselineThreat,
+    double BaselineTension,
+    double NoveltyChance,
+    double SocialPingChance,
+    double FatigueWaveChance,
+    double CalmWindowChance,
+    double DriftRate,
+    double ShockChance,
+    double EpisodeLengthMultiplier
 );

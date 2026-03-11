@@ -10,7 +10,7 @@ public interface IMlPolicyAdvisor
     bool TryLoad(string path, out int episodeId);
     void TrySave(string path, int episodeId);
     void Reset(MlConfig config);
-    MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled);
+    MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled, string mlMode, bool trainEnabled, int trainingEpisodeCount, int evalEpisodeCount);
     void ResetCounters();
     bool TryConnectRemote();
     void DisconnectRemote();

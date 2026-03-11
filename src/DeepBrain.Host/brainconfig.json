@@ -5,6 +5,8 @@
     "shockChanceBase": 0.01,
     "microThreatChanceBase": 0.03,
     "noveltyChanceBase": 0.02,
+    "socialPingChanceBase": 0.04,
+    "fatigueWaveChanceBase": 0.02,
     "calmWindowChanceBase": 0.02,
     "driftRatePerSec": 0.02,
     "baselineTension": 0.25
@@ -81,6 +83,7 @@
     },
     "remoteStrict": false,
     "logBackendSwitches": true,
+    "mode": "training",
     "seed": 1337,
     "learningRate": 0.0005,
     "gamma": 0.98,
@@ -103,6 +106,82 @@
     "targetUpdateTicks": 200,
     "epsilonMin": 0.05,
     "actionMasking": true
+  },
+  "curriculum": {
+    "mode": "round_robin",
+    "rewardGateThreshold": 0.05
+  },
+  "evaluation": {
+    "windowEpisodes": 20,
+    "saveReports": true
+  },
+  "scenarios": {
+    "calm_baseline": {
+      "baselineThreat": 0.08,
+      "baselineTension": 0.20,
+      "noveltyChance": 0.02,
+      "socialPingChance": 0.03,
+      "fatigueWaveChance": 0.02,
+      "calmWindowChance": 0.03,
+      "driftRate": 0.015,
+      "shockChance": 0.006,
+      "episodeLengthMultiplier": 1.0
+    },
+    "novelty_walk": {
+      "baselineThreat": 0.08,
+      "baselineTension": 0.22,
+      "noveltyChance": 0.05,
+      "socialPingChance": 0.02,
+      "fatigueWaveChance": 0.02,
+      "calmWindowChance": 0.04,
+      "driftRate": 0.02,
+      "shockChance": 0.006,
+      "episodeLengthMultiplier": 1.0
+    },
+    "threat_pulses": {
+      "baselineThreat": 0.16,
+      "baselineTension": 0.35,
+      "noveltyChance": 0.02,
+      "socialPingChance": 0.02,
+      "fatigueWaveChance": 0.03,
+      "calmWindowChance": 0.015,
+      "driftRate": 0.025,
+      "shockChance": 0.02,
+      "episodeLengthMultiplier": 1.0
+    },
+    "social_pull": {
+      "baselineThreat": 0.10,
+      "baselineTension": 0.24,
+      "noveltyChance": 0.02,
+      "socialPingChance": 0.06,
+      "fatigueWaveChance": 0.02,
+      "calmWindowChance": 0.03,
+      "driftRate": 0.02,
+      "shockChance": 0.008,
+      "episodeLengthMultiplier": 1.0
+    },
+    "fatigue_day": {
+      "baselineThreat": 0.10,
+      "baselineTension": 0.28,
+      "noveltyChance": 0.02,
+      "socialPingChance": 0.03,
+      "fatigueWaveChance": 0.05,
+      "calmWindowChance": 0.02,
+      "driftRate": 0.02,
+      "shockChance": 0.01,
+      "episodeLengthMultiplier": 1.0
+    },
+    "mixed_adaptive": {
+      "baselineThreat": 0.10,
+      "baselineTension": 0.25,
+      "noveltyChance": 0.03,
+      "socialPingChance": 0.04,
+      "fatigueWaveChance": 0.03,
+      "calmWindowChance": 0.03,
+      "driftRate": 0.02,
+      "shockChance": 0.012,
+      "episodeLengthMultiplier": 1.0
+    }
   },
   "useMlAdvisor": true
 }

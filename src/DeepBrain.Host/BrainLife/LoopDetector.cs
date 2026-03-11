@@ -142,6 +142,7 @@ public sealed class LoopDetector
         _stateKeys.Clear();
         SameActionStreak = 0;
         AvgRewardShort = 0;
+        LoopCount = 0;
         LoopPenalty = 0;
         LoopType = "none";
         IsLoopDetected = false;

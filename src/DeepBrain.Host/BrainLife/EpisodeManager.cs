@@ -39,6 +39,17 @@ public sealed class EpisodeManager
         _panicThreatMin = Math.Clamp(config.PanicThreatMin, 0.0, 1.0);
     }
 
+    public void Configure(EpisodeConfig config, double lengthMultiplier)
+    {
+        var maxSteps = (int)Math.Round(config.MaxSteps * Math.Max(0.1, lengthMultiplier));
+        _maxSteps = Math.Max(1, maxSteps);
+        _loopStrengthThreshold = Math.Clamp(config.LoopStrengthThreshold, 0.0, 1.0);
+        _loopHoldTicks = Math.Max(1, config.LoopHoldTicks);
+        _panicSafetyMin = Math.Clamp(config.PanicSafetyMin, 0.0, 1.0);
+        _panicPainMin = Math.Clamp(config.PanicPainMin, 0.0, 1.0);
+        _panicThreatMin = Math.Clamp(config.PanicThreatMin, 0.0, 1.0);
+    }
+
     public void RequestManualReset()
     {
         _manualResetRequested = true;

@@ -195,16 +195,19 @@ static void RunCommandLoop(
     List<string> logBuffer,
     FileBatchWriter logWriter)
 {
-    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, resetepisode, mlstatus, mlconnect, mldisconnect, reloadconfig, death, exit");
+    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, resetepisode, episode.reset, mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, curriculum.mode, curriculum.next, reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
         if (line == null)
             continue;
 
-        var cmd = line.Trim().ToLowerInvariant();
-        if (cmd.Length == 0)
+        var trimmed = line.Trim();
+        if (trimmed.Length == 0)
             continue;
+        var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var cmd = parts[0].ToLowerInvariant();
+        var arg = parts.Length > 1 ? parts[1].Trim() : "";
 
         switch (cmd)
         {
@@ -238,6 +241,10 @@ static void RunCommandLoop(
                 lifeLoop?.RequestEpisodeReset();
                 LogLine(consoleLockProvider(), logBuffer, logWriter, "episode reset requested");
                 break;
+            case "episode.reset":
+                lifeLoop?.RequestEpisodeReset();
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "episode reset requested");
+                break;
             case "mlstatus":
                 if (lifeLoop is not null)
                     LogLine(consoleLockProvider(), logBuffer, logWriter, lifeLoop.GetMlStatus());
@@ -252,6 +259,43 @@ static void RunCommandLoop(
             case "mldisconnect":
                 lifeLoop?.DisconnectMl();
                 LogLine(consoleLockProvider(), logBuffer, logWriter, "ml remote disconnected");
+                break;
+            case "ml.mode":
+                if (string.IsNullOrWhiteSpace(arg))
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, "ml.mode requires training|evaluation");
+                    break;
+                }
+                lifeLoop?.SetMlMode(arg);
+                LogLine(consoleLockProvider(), logBuffer, logWriter, $"ml mode set to {arg}");
+                break;
+            case "scenario.list":
+                var scenarios = lifeLoop?.ListScenarios() ?? Array.Empty<string>();
+                LogLine(consoleLockProvider(), logBuffer, logWriter, $"scenarios: {string.Join(", ", scenarios)}");
+                break;
+            case "scenario.set":
+                if (string.IsNullOrWhiteSpace(arg))
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, "scenario.set requires <name>");
+                    break;
+                }
+                if (lifeLoop?.TrySetScenario(arg) == true)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"scenario set: {arg}");
+                else
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"scenario not found: {arg}");
+                break;
+            case "curriculum.mode":
+                if (string.IsNullOrWhiteSpace(arg))
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, "curriculum.mode requires fixed|round_robin|reward_gated|random_seeded");
+                    break;
+                }
+                lifeLoop?.SetCurriculumMode(arg);
+                LogLine(consoleLockProvider(), logBuffer, logWriter, $"curriculum mode set to {arg}");
+                break;
+            case "curriculum.next":
+                lifeLoop?.NextScenario();
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "curriculum advanced to next scenario");
                 break;
             case "reloadconfig":
                 configLoader.ReloadNow();

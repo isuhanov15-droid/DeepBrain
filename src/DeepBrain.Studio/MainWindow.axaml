@@ -31,6 +31,8 @@
 							<TextBlock Name="LifeRewardText"/>
 							<TextBlock Name="LifeRewardBreakdownText"/>
 							<TextBlock Name="LifeEpisodeText"/>
+							<TextBlock Name="LifeScenarioText"/>
+							<TextBlock Name="LifeEvalText"/>
 							<TextBlock Name="LifeStrategyText"/>
 							<TextBlock Name="LifeDriveText"/>
 							<TextBlock Name="LifeLoopText"/>

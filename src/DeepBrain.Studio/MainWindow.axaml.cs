@@ -140,6 +140,22 @@ public partial class MainWindow : Window
         {
             LifeEpisodeText.Text = "episode=n/a";
         }
+        if (state.Scenario is not null)
+        {
+            LifeScenarioText.Text = $"scenario={state.Scenario.Name} curriculum={state.Scenario.CurriculumMode} idx={state.Scenario.Index}";
+        }
+        else
+        {
+            LifeScenarioText.Text = "scenario=n/a";
+        }
+        if (state.Evaluation is not null)
+        {
+            LifeEvalText.Text = $"eval: reward={state.Evaluation.MeanReward:0.000} loops={state.Evaluation.LoopRate:0.00} diversity={state.Evaluation.ActionDiversity:0.00} calm={state.Evaluation.CalmRatio:0.00} anxious={state.Evaluation.AnxiousRatio:0.00}";
+        }
+        else
+        {
+            LifeEvalText.Text = "eval=n/a";
+        }
         var policy = state.Policy;
         LifeStrategyText.Text = $"strategy={policy?.Strategy ?? "n/a"} reason={policy?.Reason ?? ""}";
         LifeDriveText.Text = $"drive={state.DominantDrive}";
@@ -257,7 +273,7 @@ public partial class MainWindow : Window
             var reason = !state.Ml.Enabled && !string.IsNullOrWhiteSpace(state.Ml.ReasonIfDisabled)
                 ? $" reason:{state.Ml.ReasonIfDisabled}"
                 : "";
-            LifeMlText.Text = $"ml: enable={state.Ml.Enabled} backend={state.Ml.BackendKind} core={state.Ml.CoreAvailable} remote={state.Ml.RemoteConnected} rtt={state.Ml.RttMs:0}ms eps={state.Ml.Epsilon:0.000} loss={state.Ml.LastLoss:0.000} avgQ={state.Ml.AvgQ:0.000} invalid={state.Ml.InvalidActionFallbackCount} loops={loops}{err}{reason}";
+            LifeMlText.Text = $"ml: enable={state.Ml.Enabled} mode={state.Ml.MlMode} train={state.Ml.TrainEnabled} backend={state.Ml.BackendKind} core={state.Ml.CoreAvailable} remote={state.Ml.RemoteConnected} rtt={state.Ml.RttMs:0}ms eps={state.Ml.Epsilon:0.000} loss={state.Ml.LastLoss:0.000} avgQ={state.Ml.AvgQ:0.000} invalid={state.Ml.InvalidActionFallbackCount} loops={loops} trainEp={state.Ml.TrainingEpisodeCount} evalEp={state.Ml.EvalEpisodeCount}{err}{reason}";
         }
         else
         {

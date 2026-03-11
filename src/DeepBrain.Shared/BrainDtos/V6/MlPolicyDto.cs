@@ -24,5 +24,9 @@ public sealed record MlPolicyDto(
     bool RemoteConnected,
     double RttMs,
     string? LastRemoteError,
-    string? ReasonIfDisabled
+    string? ReasonIfDisabled,
+    string MlMode,
+    bool TrainEnabled,
+    int TrainingEpisodeCount,
+    int EvalEpisodeCount
 );

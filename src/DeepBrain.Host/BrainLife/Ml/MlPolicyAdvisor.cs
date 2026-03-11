@@ -196,7 +196,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         File.WriteAllText(path, json);
     }
 
-    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled)
+    public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled, string mlMode, bool trainEnabled, int trainingEpisodeCount, int evalEpisodeCount)
     {
         if (!enabled)
         {
@@ -224,7 +224,11 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
                 RemoteConnected: _backend.IsConnected,
                 RttMs: _backend.LastRttMs,
                 LastRemoteError: _backend.LastError,
-                ReasonIfDisabled: reasonIfDisabled
+                ReasonIfDisabled: reasonIfDisabled,
+                MlMode: mlMode,
+                TrainEnabled: trainEnabled,
+                TrainingEpisodeCount: trainingEpisodeCount,
+                EvalEpisodeCount: evalEpisodeCount
             );
         }
 
@@ -252,7 +256,11 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
             RemoteConnected: _backend.IsConnected,
             RttMs: _backend.LastRttMs,
             LastRemoteError: _backend.LastError,
-            ReasonIfDisabled: reasonIfDisabled
+            ReasonIfDisabled: reasonIfDisabled,
+            MlMode: mlMode,
+            TrainEnabled: trainEnabled,
+            TrainingEpisodeCount: trainingEpisodeCount,
+            EvalEpisodeCount: evalEpisodeCount
         );
     }
 

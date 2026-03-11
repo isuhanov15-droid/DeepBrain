@@ -8,11 +8,14 @@ v0.8.2 добавляет эпизоды, декомпозицию наград�
 v0.8.3 добавляет ML Bridge: выбор backend (local/remote/off), интеграцию с ML.Host по TCP и расширенную телеметрию backend/remote.
 v0.8.4 добавляет ясный режим ML (reasonIfDisabled), mlstatus в одну строку и документацию `docs/ML_BACKENDS.md`.
 v0.8.5 добавляет новое поведенческое ядро: loop detector по fingerprint, эпизоды, декомпозицию награды и жёсткое action masking.
+v0.9 добавляет curriculum сценариев, training/evaluation режимы, отчёты по эпизодам и агрегированную оценку политики с заморозкой базовой телеметрии.
 
-### Manual check (v0.8.5)
+### Manual check (v0.9)
 1) Запустить Host + Studio и наблюдать 10–15 минут: trace/state/output обновляются.
-2) Индуцировать loop (например, временно ограничить действия маской) и увидеть рост loopStrength и `episode` reset с reason=loop.
-3) Убедиться, что после reset эпизода система продолжает работать и начинает новый эпизод.
+2) Переключать сценарии через Host commands: `scenario.list`, `scenario.set <name>`, `curriculum.mode`.
+3) Убедиться, что в Life‑панели меняются `scenario` и `curriculum`.
+4) Индуцировать loop (например, временно ограничить действия маской) и увидеть рост loopStrength и `episode` reset с reason=loop.
+5) Убедиться, что после reset эпизода система продолжает работать и начинает новый эпизод, а в `reports/episodes/YYYY-MM-DD/` появляются отчёты.
 
 ---
 
@@ -122,6 +125,7 @@ LifeStateDto (`LifeStateDto.cs`):
 - расширения v0.5–v0.7: `Attention`, `RecentEvents`, `SemanticNotesTop`, `Character`, `Climate`, `PainSource`,
 - расширения v0.8: `ConfigVersion`, `Appraisal`, `Stats`, `Ml`,
 - расширения v0.8.2: `Reward` (разложенная награда), `Episode` (id/tick/len/reason).
+- расширения v0.9: `Scenario` (scenario/curriculum/index) и `Evaluation` (снимок метрик политики).
 
 EpisodeDto (`EpisodeDto.cs`):
 - `Tick`, `BeforeHomeostasis`, `AfterHomeostasis`, `Action`, `Reward`, `Ts`.
@@ -161,7 +165,16 @@ MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
   `BufferSize`, `BufferCapacity`, `LastLoss`, `AvgLoss100`, `AvgReward200`, `AvgQ`,
   `Entropy`, `TrainSteps`, `NanSkips`, `IllegalChoiceCount`, `OverrideCount`,
   `InvalidActionFallbackCount`, `PolicySource`,
-  `BackendKind`, `RemoteConnected`, `RttMs`, `LastRemoteError`, `ReasonIfDisabled`.
+  `BackendKind`, `RemoteConnected`, `RttMs`, `LastRemoteError`, `ReasonIfDisabled`,
+  `MlMode`, `TrainEnabled`, `TrainingEpisodeCount`, `EvalEpisodeCount`.
+
+ScenarioInfoDto (`src/DeepBrain.Shared/BrainDtos/V6/ScenarioInfoDto.cs`):
+- `Name`, `CurriculumMode`, `Index` — текущий сценарий/режим/индекс curriculum.
+
+EvaluationSnapshotDto (`src/DeepBrain.Shared/BrainDtos/V6/EvaluationSnapshotDto.cs`):
+- агрегаты по окну эпизодов: `MeanReward`, `MedianReward`, `SuccessRate`,
+  `AvgEpisodeLength`, `LoopRate`, `ActionDiversity`, `CalmRatio`, `AnxiousRatio`,
+  `CuriousRatio`, `InvalidActionRate`, `MaskFallbackRate`, `EpisodeCount`.
 
 ### src/DeepBrain.Shared/MlBridge/MlBridgeDtos.cs
 Назначение: DTO для ML Bridge (remote backend).
@@ -171,7 +184,7 @@ MlPolicyDto (`src/DeepBrain.Shared/BrainDtos/V6/MlPolicyDto.cs`):
 - `MlCheckpointRequest/Response` — save/load чекпоинта.
 
 RewardDto (`src/DeepBrain.Shared/BrainDtos/V6/RewardDto.cs`):
-- `Homeostasis`, `Explore`, `Social`, `LoopPenalty`, `Total`.
+- `Homeostasis`, `Explore`, `Social`, `LoopPenalty`, `InvalidActionPenalty`, `Total`.
 
 EpisodeInfoDto (`src/DeepBrain.Shared/BrainDtos/V6/EpisodeInfoDto.cs`):
 - `EpisodeId`, `EpisodeTick`, `EpisodeLengthTicks`, `ResetReason`.
@@ -518,8 +531,12 @@ v0.5:
   `recall_safe_memory`, `explore_signal`, `emit_message`.
 
 ### src/DeepBrain.Host/BrainLife/RewardEngine.cs
-Назначение: reward по изменению состояния.
-Формула: энергия+безопасность − (fatigue+pain)*0.5.
+Назначение: декомпозированная награда v0.8.2+.
+Компоненты:
+- `homeostasis` (energy/safety/fatigue/pain);
+- `explore`, `social` (контекстные бонусы);
+- `loopPenalty` (штраф петли);
+- `invalidActionPenalty` (штраф за запрещённое действие).
 
 ### src/DeepBrain.Host/BrainLife/RewardCalculator.cs
 Назначение: декомпозиция награды v0.8.2.
@@ -527,10 +544,36 @@ v0.5:
 - `homeostasis` — базовый reward,
 - `explore`, `social` — бонусы за исследование/соц. действие,
 - `loopPenalty` — штраф петли,
+- `invalidActionPenalty` — штраф маски,
 - `total` — сумма с clamp.
 
+### src/DeepBrain.Host/BrainLife/CurriculumManager.cs
+Назначение: управление сценарием мира и режимом curriculum.
+Функции:
+- выбор сценария (`fixed`, `round_robin`, `reward_gated`, `random_seeded`);
+- `scenario.list`, `scenario.set`, `curriculum.mode`, `curriculum.next`.
+
+### src/DeepBrain.Host/BrainLife/ScenarioDefinition.cs
+Назначение: параметризация климата мира для сценария.
+Поля: baselineThreat/tension, шансы событий, drift/shock, множитель длины эпизода.
+
+### src/DeepBrain.Host/BrainLife/ScenarioScorer.cs / ScenarioScore.cs
+Назначение: простая rule‑based оценка прохождения сценария (pass/fail).
+
+### src/DeepBrain.Host/BrainLife/EpisodeReport.cs
+Назначение: отчёт по эпизоду (JSON).
+Содержит: reward breakdown, action histogram, mood distribution, loop/maxLoop,
+avg/max pain, social/selftalk, mask/invalid counts, backend/epsilon.
+
+### src/DeepBrain.Host/BrainLife/EpisodeReportWriter.cs
+Назначение: сохранение отчётов в `reports/episodes/YYYY-MM-DD/episodes.jsonl`.
+
+### src/DeepBrain.Host/BrainLife/PolicyEvaluator.cs
+Назначение: агрегатор метрик политики по окну последних N эпизодов
+(mean/median reward, loop rate, diversity, calm/anxious ratios и т.п.).
+
 ### src/DeepBrain.Host/BrainLife/LifeLoop.cs
-Назначение: главный цикл v0.4…v0.8.
+Назначение: главный цикл v0.4…v0.9.
 Шаги:
 1) `CircadianClock.Tick`.
 2) `SleepEngine.Update`.
@@ -539,6 +582,7 @@ v0.5:
    - пропуск выбора действий;
    - broadcast state с `IsSleeping=true`.
 4) если бодрствование:
+   - выбор сценария (`CurriculumManager`) и применение `ScenarioDefinition`;
    - `GoalResolver.Resolve`.
    - `PlanEngine.Update`.
    - `ActionSelector.BuildCandidates` + ML‑advisor blending (+ action mask).
@@ -547,7 +591,11 @@ v0.5:
    - `EpisodeManager` управляет эпизодами;
    - `RewardCalculator` формирует `RewardDto`;
    - reset по length/loop/manual, trace `episode.reset`.
-6) LifeState включает `Circadian`, `Goals`, `ActivePlan`, `Appraisal`, `Stats`, `Ml`, `ConfigVersion`, `Reward`, `Episode`.
+6) v0.9:
+   - training/evaluation mode (epsilon=0 и без обучения в eval);
+   - `EpisodeReport` + `PolicyEvaluator` + `ScenarioScorer`;
+   - LifeState включает `Scenario` и `Evaluation`.
+7) LifeState включает `Circadian`, `Goals`, `ActivePlan`, `Appraisal`, `Stats`, `Ml`, `ConfigVersion`, `Reward`, `Episode`.
 7) Диагностика:
    - каждые 50 тиков: phase/attention/plan/action/reward.
    - каждые 200 тиков: `STATS(200)` и `STATS_ML(200)`.
@@ -594,6 +642,10 @@ Connect: ping + подписки logs/state/trace/life/output.
 - `ml.backend`, `remoteConnected`, `rttMs`, `lastErr` (кратко в строке ml).
 Поля v0.8.4 (Life panel):
 - `reasonIfDisabled` (только когда ML выключен).
+Поля v0.9 (Life panel):
+- `scenario` (name/curriculum/index);
+- `eval` (reward/loops/diversity/calm/anxious);
+- `ml` дополнено `mode`, `train`, `trainingEpisodeCount`, `evalEpisodeCount`.
 
 ### src/DeepBrain.Studio/Net/TcpClientService.cs
 Назначение: TCP‑клиент.

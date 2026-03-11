@@ -31,5 +31,7 @@ public sealed record LifeStateDto(
     LifeStatsDto? Stats = null,
     MlPolicyDto? Ml = null,
     RewardDto? Reward = null,
-    EpisodeInfoDto? Episode = null
+    EpisodeInfoDto? Episode = null,
+    ScenarioInfoDto? Scenario = null,
+    EvaluationSnapshotDto? Evaluation = null
 );
