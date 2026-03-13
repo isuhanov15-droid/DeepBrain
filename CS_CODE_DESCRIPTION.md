@@ -9,6 +9,7 @@ v0.8.3 добавляет ML Bridge: выбор backend (local/remote/off), ин
 v0.8.4 добавляет ясный режим ML (reasonIfDisabled), mlstatus в одну строку и документацию `docs/ML_BACKENDS.md`.
 v0.8.5 добавляет новое поведенческое ядро: loop detector по fingerprint, эпизоды, декомпозицию награды и жёсткое action masking.
 v0.9 добавляет curriculum сценариев, training/evaluation режимы, отчёты по эпизодам и агрегированную оценку политики с заморозкой базовой телеметрии.
+v1.0 фиксирует ядро: стабильные DTO и JSON property names, компактный tick trace, неблокирующую запись `episodes.jsonl`, единый `brainconfig.json`, `docs/regression_checklist.md` и `docs/deepbrain_architecture.md`.
 
 ### Manual check (v0.9)
 1) Запустить Host + Studio и наблюдать 10–15 минут: trace/state/output обновляются.

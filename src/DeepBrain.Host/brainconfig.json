@@ -1,4 +1,19 @@
 {
+  "tickRate": 5.0,
+  "epsilon": 1.0,
+  "epsilonMin": 0.05,
+  "epsilonDecay": 0.0005,
+  "loopThreshold": 0.85,
+  "selfTalkCooldown": 40,
+  "rewardWeights": {
+    "homeostasis": 1.0,
+    "explore": 1.0,
+    "social": 1.0,
+    "loopPenalty": 0.05,
+    "invalidActionPenalty": 0.05
+  },
+  "scenarioDefault": "calm_baseline",
+  "curriculumMode": "round_robin",
   "world": {
     "baselineThreat": 0.10,
     "threatReturnRatePerSec": 0.06,
@@ -72,9 +87,9 @@
     "panicThreatMin": 0.90
   },
   "ml": {
-    "enable": true,
-    "strictRequireCore": true,
-    "backend": "remote",
+    "enable": false,
+    "strictRequireCore": false,
+    "backend": "local",
     "remote": {
       "host": "127.0.0.1",
       "port": 7777,
@@ -183,5 +198,5 @@
       "episodeLengthMultiplier": 1.0
     }
   },
-  "useMlAdvisor": true
+  "useMlAdvisor": false
 }

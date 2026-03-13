@@ -231,11 +231,13 @@ public sealed class LifeLoop
 
     public async Task RunAsync(CancellationToken ct)
     {
-        const double dtSeconds = 0.2;
-        var delayMs = 200;
-
         while (!ct.IsCancellationRequested)
         {
+            var (config, _) = _configLoader.GetCurrent();
+            var tickRate = Math.Max(1.0, config.TickRate);
+            var dtSeconds = 1.0 / tickRate;
+            var delayMs = Math.Max(1, (int)Math.Round(1000.0 / tickRate));
+
             if (_running || _stepRequested)
             {
                 TickOnce(dtSeconds, ct);
@@ -259,9 +261,14 @@ public sealed class LifeLoop
         var curriculumCfg = config.Curriculum ?? BrainConfig.Default.Curriculum;
         var evalCfg = config.Evaluation ?? BrainConfig.Default.Evaluation;
         var scenarioCfg = config.Scenarios ?? BrainConfig.Default.Scenarios;
+        var rewardWeights = config.RewardWeights ?? BrainConfig.Default.RewardWeights ?? new RewardWeightsConfig(1.0, 1.0, 1.0, 0.05, 0.05);
         if (!string.IsNullOrWhiteSpace(_curriculumModeOverride))
             curriculumCfg = curriculumCfg with { Mode = _curriculumModeOverride };
+        else if (!string.IsNullOrWhiteSpace(config.CurriculumMode))
+            curriculumCfg = curriculumCfg with { Mode = config.CurriculumMode };
         _curriculum.Configure(curriculumCfg, scenarioCfg);
+        if (_tick == 0 && !string.IsNullOrWhiteSpace(config.ScenarioDefault))
+            _curriculum.TrySetScenario(config.ScenarioDefault);
         _policyEvaluator.Configure(evalCfg);
         var scenario = _curriculum.GetScenario();
         _scenarioName = scenario.Name;
@@ -269,14 +276,34 @@ public sealed class LifeLoop
         _scenarioIndex = _curriculum.ScenarioIndex;
         var worldConfig = scenario.Apply(config.World);
 
-        var mlConfig = config.Ml with { Enable = config.Ml.Enable || config.UseMlAdvisor };
+        _selfTalkThrottle.Configure(config.SelfTalkCooldown);
+        var rewardConfig = config.Reward with
+        {
+            HomeostasisWeight = rewardWeights.Homeostasis,
+            ExploreWeight = rewardWeights.Explore,
+            SocialWeight = rewardWeights.Social,
+            LoopPenaltyWeight = rewardWeights.LoopPenalty,
+            InvalidActionPenalty = rewardWeights.InvalidActionPenalty
+        };
+        var episodeConfig = config.Episode with
+        {
+            LoopStrengthThreshold = config.LoopThreshold
+        };
+        var mlConfig = config.Ml with
+        {
+            Enable = config.Ml.Enable || config.UseMlAdvisor,
+            EpsilonStart = config.Epsilon,
+            EpsilonEnd = config.EpsilonMin,
+            EpsilonMin = config.EpsilonMin,
+            EpsilonDecay = config.EpsilonDecay
+        };
         var mlMode = ResolveMlMode(mlConfig);
         var trainEnabled = mlMode != "evaluation";
         var mlConfigEffective = trainEnabled
             ? mlConfig
             : mlConfig with { EpsilonStart = 0, EpsilonEnd = 0, EpsilonMin = 0, EpsilonDecay = 0, TrainEveryTicks = int.MaxValue, TrainStepsPerBatch = 0 };
 
-        _episode.Configure(config.Episode, scenario.EpisodeLengthMultiplier);
+        _episode.Configure(episodeConfig, scenario.EpisodeLengthMultiplier);
         _loop.Configure(mlConfig.LoopWindow, mlConfig.LoopSameK, mlConfig.LoopAltK);
         var backendKind = (mlConfig.Backend ?? "off").Trim().ToLowerInvariant();
         var remoteConnected = backendKind == "remote" && _ml.TryConnectRemote();
@@ -379,8 +406,13 @@ public sealed class LifeLoop
                     "none"
                 ),
                 sleepScenarioInfo,
-                sleepEvalDto
+                sleepEvalDto,
+                new DecisionDto("sleep", "internal", "sleep", "ok", "heuristic"),
+                new ScenarioDto(_scenarioName),
+                new CurriculumStateDto(_curriculumMode, _scenarioIndex),
+                new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds)
             );
+            EmitTrace("tick", $"tick={_tick} ep={_episode.EpisodeId} act=sleep reward=0.000 loop=none eps=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
             return;
@@ -541,11 +573,11 @@ public sealed class LifeLoop
         if (action.Name == "explore_signal")
             _world.DampenNovelty(action.Strength);
 
-        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, 0.0, invalidAction, config.Reward);
+        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, 0.0, invalidAction, rewardConfig);
         var regBonus = ComputeRegulationBonus(action, beforeHomeo, _homeo, beforeAffect, _affect);
         rewardBase = ApplyHomeostasisBonus(rewardBase, regBonus);
         _loop.Update(action.Name, _affect.Mood, _affect.Arousal, _homeo.Energy, _homeo.Fatigue, dominantDrive, circ.Phase, attention.Focus1, rewardBase.Total, _tick);
-        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.LoopStrength, invalidAction, config.Reward);
+        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.LoopStrength, invalidAction, rewardConfig);
         rewardDto = ApplyHomeostasisBonus(rewardDto, regBonus);
         _learning.Update(action.Name, rewardDto.Total);
         _cooldowns.Mark(action.Name, _tick);
@@ -613,7 +645,12 @@ public sealed class LifeLoop
                 Valence = _affect.Valence - beforeAffect.Valence
             }
         }, ct);
-        EmitTrace("reward", rewardDto, ct);
+        var rewardLine = $"reward: tot={rewardDto.Total:+0.000;-0.000} h={rewardDto.Homeostasis:+0.000;-0.000} x={rewardDto.Explore:+0.000;-0.000} s={rewardDto.Social:+0.000;-0.000} lp={rewardDto.LoopPenalty:+0.000;-0.000} ia={rewardDto.InvalidActionPenalty:+0.000;-0.000}";
+        EmitTrace("reward", new
+        {
+            line = rewardLine,
+            reward = rewardDto
+        }, ct);
 
         if (action.Kind == "external" && string.IsNullOrWhiteSpace(outcome.Message))
             outcome = new OutcomeDto(outcome.Action, outcome.Reward, $"action={action.Name}");
@@ -676,6 +713,13 @@ public sealed class LifeLoop
             _curriculumMode,
             _scenarioIndex
         );
+        var decisionDto = new DecisionDto(
+            action.Name,
+            action.Kind,
+            reason,
+            maskStatus,
+            decision.PolicySource
+        );
         var evalSnapshot = _policyEvaluator.Snapshot(mlMode == "evaluation");
         var evalDto = ToEvaluationDto(evalSnapshot);
         var state = new LifeStateDto(
@@ -714,8 +758,13 @@ public sealed class LifeLoop
             rewardDto,
             episodeInfo,
             scenarioInfo,
-            evalDto
+            evalDto,
+            decisionDto,
+            new ScenarioDto(_scenarioName),
+            new CurriculumStateDto(_curriculumMode, _scenarioIndex),
+            new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds)
         );
+        EmitTrace("tick", $"tick={_tick} ep={_episode.EpisodeId} act={action.Name} reward={rewardDto.Total:0.000} loop={_loop.LoopType} eps={decision.Epsilon:0.000}", ct);
 
         var episode = new EpisodeDto(
             _tick,
@@ -751,7 +800,7 @@ public sealed class LifeLoop
                 _log($"SCENARIO_NEXT name={_curriculum.ScenarioName} idx={_curriculum.ScenarioIndex} mode={_curriculum.Mode}");
             ResetEpisode(resetReason);
             _log($"EPISODE_RESET reason={resetReason} id={_episode.EpisodeId}");
-            EmitTrace("episode.reset", new { reason = resetReason, episodeId = _episode.EpisodeId }, ct);
+            EmitTrace("episode.reset", $"episode={_episode.EpisodeId} reason={resetReason}", ct);
         }
 
         foreach (var change in _habits.ApplyDecay(_tick))

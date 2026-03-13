@@ -14,7 +14,16 @@ public sealed record BrainConfig(
     CurriculumConfig Curriculum,
     EvaluationConfig Evaluation,
     Dictionary<string, ScenarioConfig> Scenarios,
-    bool UseMlAdvisor = false)
+    bool UseMlAdvisor = false,
+    double TickRate = 5.0,
+    double Epsilon = 1.0,
+    double EpsilonMin = 0.05,
+    double EpsilonDecay = 0.0005,
+    double LoopThreshold = 0.85,
+    int SelfTalkCooldown = 40,
+    RewardWeightsConfig? RewardWeights = null,
+    string ScenarioDefault = "calm_baseline",
+    string CurriculumMode = "round_robin")
 {
     public static BrainConfig Default => new(
         new WorldConfig(
@@ -201,7 +210,23 @@ public sealed record BrainConfig(
                 ShockChance: 0.012,
                 EpisodeLengthMultiplier: 1.0
             )
-        }
+        },
+        UseMlAdvisor: false,
+        TickRate: 5.0,
+        Epsilon: 1.0,
+        EpsilonMin: 0.05,
+        EpsilonDecay: 0.0005,
+        LoopThreshold: 0.85,
+        SelfTalkCooldown: 40,
+        RewardWeights: new RewardWeightsConfig(
+            Homeostasis: 1.0,
+            Explore: 1.0,
+            Social: 1.0,
+            LoopPenalty: 0.05,
+            InvalidActionPenalty: 0.05
+        ),
+        ScenarioDefault: "calm_baseline",
+        CurriculumMode: "round_robin"
     );
 }
 
@@ -273,6 +298,14 @@ public sealed record RewardConfig(
     double InvalidActionPenalty,
     double ExploreBase,
     double SocialBase
+);
+
+public sealed record RewardWeightsConfig(
+    double Homeostasis,
+    double Explore,
+    double Social,
+    double LoopPenalty,
+    double InvalidActionPenalty
 );
 
 public sealed record EpisodeConfig(

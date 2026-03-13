@@ -12,7 +12,7 @@ public sealed class EpisodeManager
     private double _panicPainMin;
     private double _panicThreatMin;
     private string _lastResetReason = "none";
-    private bool _manualResetRequested;
+    private string? _requestedResetReason;
 
     public int EpisodeId => _episodeId;
     public int EpisodeTick => _episodeTick;
@@ -52,7 +52,17 @@ public sealed class EpisodeManager
 
     public void RequestManualReset()
     {
-        _manualResetRequested = true;
+        _requestedResetReason = "manual";
+    }
+
+    public void RequestScenarioComplete()
+    {
+        _requestedResetReason = "scenario_complete";
+    }
+
+    public void RequestReset(string reason)
+    {
+        _requestedResetReason = string.IsNullOrWhiteSpace(reason) ? "manual" : reason.Trim().ToLowerInvariant();
     }
 
     public void SetEpisodeId(int episodeId)
@@ -65,10 +75,10 @@ public sealed class EpisodeManager
         reason = null;
         _episodeTick++;
 
-        if (_manualResetRequested)
+        if (!string.IsNullOrWhiteSpace(_requestedResetReason))
         {
-            _manualResetRequested = false;
-            reason = "manual";
+            reason = _requestedResetReason;
+            _requestedResetReason = null;
             return true;
         }
 
