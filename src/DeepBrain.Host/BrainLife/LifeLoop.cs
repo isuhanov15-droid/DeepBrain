@@ -95,6 +95,12 @@ public sealed class LifeLoop
     private int _evalEpisodeCount;
     private bool _sleepConsolidated;
     private string? _lastSelfTalk;
+    private int _loopHighTicks;
+    private int _loopLowTicks;
+    private int _calmWindowTicks;
+    private int _calmWindowInactiveTicks;
+    private bool _calmWindowOpen;
+    private bool _selfTalkLoopActive;
     private LifeStatsDto _statsSnapshot = new(0, 0, 0, 0);
     private string _configVersion = "default";
     private MlPolicyDto? _mlTelemetry;
@@ -276,7 +282,7 @@ public sealed class LifeLoop
         _scenarioIndex = _curriculum.ScenarioIndex;
         var worldConfig = scenario.Apply(config.World);
 
-        _selfTalkThrottle.Configure(config.SelfTalkCooldown);
+        _selfTalkThrottle.Configure(config.SelfTalkCooldown, config.SelfTalkRepeatCooldownTicks, config.SelfTalkSemanticCooldownTicks);
         var rewardConfig = config.Reward with
         {
             HomeostasisWeight = rewardWeights.Homeostasis,
@@ -410,7 +416,8 @@ public sealed class LifeLoop
                 new DecisionDto("sleep", "internal", "sleep", "ok", "heuristic"),
                 new ScenarioDto(_scenarioName),
                 new CurriculumStateDto(_curriculumMode, _scenarioIndex),
-                new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds)
+                new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
+                new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
             );
             EmitTrace("tick", $"tick={_tick} ep={_episode.EpisodeId} act=sleep reward=0.000 loop=none eps=0.000", ct);
             _broadcast(stateSleep, ct);
@@ -556,7 +563,7 @@ public sealed class LifeLoop
         var action = chosen.Action;
         var maskStatus = maskFallback ? "fallback" : "ok";
         var reason = decision.PolicySource == "heuristic" ? chosen.Reason : $"{chosen.Reason}|{decision.PolicySource}";
-        reason = $"{reason}|mask={maskStatus}";
+        reason = NormalizeDecisionReason(reason, maskFallback);
         if (decision.IllegalChoice)
             _log("ML_INVALID_ACTION_FALLBACK");
 
@@ -573,11 +580,11 @@ public sealed class LifeLoop
         if (action.Name == "explore_signal")
             _world.DampenNovelty(action.Strength);
 
-        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, 0.0, invalidAction, rewardConfig);
+        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, false, 0.0, invalidAction, rewardConfig);
         var regBonus = ComputeRegulationBonus(action, beforeHomeo, _homeo, beforeAffect, _affect);
         rewardBase = ApplyHomeostasisBonus(rewardBase, regBonus);
         _loop.Update(action.Name, _affect.Mood, _affect.Arousal, _homeo.Energy, _homeo.Fatigue, dominantDrive, circ.Phase, attention.Focus1, rewardBase.Total, _tick);
-        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.LoopStrength, invalidAction, rewardConfig);
+        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.IsInLoop, _loop.LoopStrength, invalidAction, rewardConfig);
         rewardDto = ApplyHomeostasisBonus(rewardDto, regBonus);
         _learning.Update(action.Name, rewardDto.Total);
         _cooldowns.Mark(action.Name, _tick);
@@ -645,12 +652,8 @@ public sealed class LifeLoop
                 Valence = _affect.Valence - beforeAffect.Valence
             }
         }, ct);
-        var rewardLine = $"reward: tot={rewardDto.Total:+0.000;-0.000} h={rewardDto.Homeostasis:+0.000;-0.000} x={rewardDto.Explore:+0.000;-0.000} s={rewardDto.Social:+0.000;-0.000} lp={rewardDto.LoopPenalty:+0.000;-0.000} ia={rewardDto.InvalidActionPenalty:+0.000;-0.000}";
-        EmitTrace("reward", new
-        {
-            line = rewardLine,
-            reward = rewardDto
-        }, ct);
+        var rewardLine = FormatRewardTraceLine(rewardDto);
+        EmitTrace("reward", rewardLine, ct);
 
         if (action.Kind == "external" && string.IsNullOrWhiteSpace(outcome.Message))
             outcome = new OutcomeDto(outcome.Action, outcome.Reward, $"action={action.Name}");
@@ -720,6 +723,15 @@ public sealed class LifeLoop
             maskStatus,
             decision.PolicySource
         );
+        var loopInfo = new LoopInfoDto(
+            _loop.IsInLoop,
+            _loop.LoopObservedCount,
+            _loop.LoopObservedCount,
+            _loop.LoopStrength,
+            Math.Abs(rewardDto.LoopPenalty),
+            NormalizeLoopType(_loop.LoopType),
+            _loop.Streak
+        );
         var evalSnapshot = _policyEvaluator.Snapshot(mlMode == "evaluation");
         var evalDto = ToEvaluationDto(evalSnapshot);
         var state = new LifeStateDto(
@@ -762,7 +774,8 @@ public sealed class LifeLoop
             decisionDto,
             new ScenarioDto(_scenarioName),
             new CurriculumStateDto(_curriculumMode, _scenarioIndex),
-            new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds)
+            new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
+            loopInfo
         );
         EmitTrace("tick", $"tick={_tick} ep={_episode.EpisodeId} act={action.Name} reward={rewardDto.Total:0.000} loop={_loop.LoopType} eps={decision.Epsilon:0.000}", ct);
 
@@ -795,7 +808,7 @@ public sealed class LifeLoop
                 _evalEpisodeCount++;
             else
                 _trainingEpisodeCount++;
-            var gateReward = _policyEvaluator.Snapshot(mlMode == "evaluation").MeanReward;
+            var gateReward = _policyEvaluator.Snapshot(mlMode == "evaluation").AvgReward;
             if (_curriculum.Advance(gateReward))
                 _log($"SCENARIO_NEXT name={_curriculum.ScenarioName} idx={_curriculum.ScenarioIndex} mode={_curriculum.Mode}");
             ResetEpisode(resetReason);
@@ -824,24 +837,63 @@ public sealed class LifeLoop
                 _log($"LOOP WARNING: strategy={strategy} action={action.Name}");
         }
 
+        if (_loop.IsInLoop && _loop.LoopStrength >= config.SelfTalkLoopMinStrength)
+            _loopHighTicks++;
+        else
+            _loopHighTicks = 0;
+
+        if (!_loop.IsInLoop || _loop.LoopStrength <= config.SelfTalkRecoveryThreshold)
+            _loopLowTicks++;
+        else
+            _loopLowTicks = 0;
+
+        var calmWindowFresh = recentEvents.Any(e =>
+            e.Type == "calm_window" &&
+            e.Salience > 0.3 &&
+            e.AgeSeconds <= Math.Max(1.0, dtSeconds * (config.SelfTalkCalmWindowHoldTicks + 1)));
+        if (calmWindowFresh)
+        {
+            _calmWindowTicks++;
+            _calmWindowInactiveTicks = 0;
+        }
+        else
+        {
+            _calmWindowTicks = 0;
+            _calmWindowInactiveTicks++;
+        }
+
+        if (_calmWindowInactiveTicks >= config.SelfTalkCalmWindowHoldTicks)
+            _calmWindowOpen = false;
+
+        var enteredLoopTransition = !_selfTalkLoopActive && _loopHighTicks >= config.SelfTalkLoopHoldTicks;
+        var loopTypeChangedTransition = _selfTalkLoopActive && _loop.LoopTypeChanged && _loopHighTicks >= config.SelfTalkLoopHoldTicks;
+        var recoveredLoopTransition = _selfTalkLoopActive && _loopLowTicks >= config.SelfTalkRecoveryHoldTicks;
+        var calmWindowEntered = !_calmWindowOpen && _calmWindowTicks >= config.SelfTalkCalmWindowHoldTicks;
+        var semanticEvent = ResolveSelfTalkSemanticEvent(enteredLoopTransition, loopTypeChangedTransition, recoveredLoopTransition, calmWindowEntered, resetReason);
         var selfTalk = _selfTalk.MaybeSpeak(new SelfTalkContext(
-            _sleep.EnteredSleep,
-            _sleep.WokeUp,
-            _loop.LoopPenalty,
-            _affect.Mood,
-            instincts.SelfPreservation,
-            attention.Focus1,
-            recentEvents.Any(e => e.Type == "calm_window"),
-            rewardDto.Total
+            enteredLoopTransition,
+            loopTypeChangedTransition,
+            recoveredLoopTransition,
+            calmWindowEntered,
+            resetReason == "loop",
+            NormalizeLoopType(_loop.LoopType),
+            _loop.LoopStrength,
+            config.SelfTalkLoopMinStrength
         ), voiceMode, _tick);
         _lastSelfTalk = selfTalk;
-        if (!string.IsNullOrWhiteSpace(selfTalk) && _selfTalkThrottle.ShouldSpeak(_tick, selfTalk))
+        if (!string.IsNullOrWhiteSpace(selfTalk) && _selfTalkThrottle.ShouldSpeak(_tick, selfTalk, semanticEvent))
         {
             _log($"SELF TALK: {selfTalk}");
             EmitTrace("selftalk", new { text = selfTalk }, ct);
             _output(new LifeOutputDto(_tick, DateTimeOffset.Now, selfTalk, "selftalk"), ct);
             _episodeSelfTalkCount++;
         }
+        if (enteredLoopTransition)
+            _selfTalkLoopActive = true;
+        if (recoveredLoopTransition || resetReason == "loop")
+            _selfTalkLoopActive = false;
+        if (calmWindowEntered)
+            _calmWindowOpen = true;
 
         var habitUpdated = _habits.UpdateAfter(action.Name, rewardDto.Total, cueKey, _tick);
         if (habitUpdated is not null)
@@ -1004,6 +1056,12 @@ public sealed class LifeLoop
         _statsSnapshot = new LifeStatsDto(0, 0, 0, 0);
         _outputSinceDiag = null;
         _loopBreakTicks = 0;
+        _loopHighTicks = 0;
+        _loopLowTicks = 0;
+        _calmWindowTicks = 0;
+        _calmWindowInactiveTicks = 0;
+        _calmWindowOpen = false;
+        _selfTalkLoopActive = false;
     }
 
     private void UpdateStats(string actionName, string mood, HomeostasisDto homeo, AttentionDto attention, double reward)
@@ -1141,19 +1199,60 @@ public sealed class LifeLoop
     private static DeepBrain.Shared.BrainDtos.V6.EvaluationSnapshotDto ToEvaluationDto(EvaluationSnapshot snapshot)
     {
         return new DeepBrain.Shared.BrainDtos.V6.EvaluationSnapshotDto(
-            snapshot.MeanReward,
+            snapshot.AvgReward,
             snapshot.MedianReward,
             snapshot.SuccessRate,
             snapshot.AvgEpisodeLength,
-            snapshot.LoopRate,
-            snapshot.ActionDiversity,
-            snapshot.CalmRatio,
-            snapshot.AnxiousRatio,
-            snapshot.CuriousRatio,
-            snapshot.InvalidActionRate,
-            snapshot.MaskFallbackRate,
-            snapshot.EpisodeCount
+            Math.Clamp(snapshot.LoopRate, 0.0, 1.0),
+            Math.Clamp(snapshot.ActionDiversity, 0.0, 1.0),
+            Math.Clamp(snapshot.CalmRatio, 0.0, 1.0),
+            Math.Clamp(snapshot.AnxiousRatio, 0.0, 1.0),
+            Math.Clamp(snapshot.CuriousRatio, 0.0, 1.0),
+            Math.Clamp(snapshot.InvalidActionRate, 0.0, 1.0),
+            Math.Clamp(snapshot.MaskFallbackRate, 0.0, 1.0),
+            snapshot.EpisodeCount,
+            Math.Max(0, snapshot.CalmCount),
+            Math.Max(0, snapshot.AnxiousCount),
+            Math.Max(0, snapshot.CuriousCount),
+            Math.Max(0, snapshot.LoopCount)
         );
+    }
+
+    private static string FormatRewardTraceLine(RewardDto reward)
+    {
+        return $"reward: tot={FormatSigned(reward.Total)} h={FormatSigned(reward.Homeostasis)} x={FormatSigned(reward.Explore)} s={FormatSigned(reward.Social)} lp={FormatSigned(reward.LoopPenalty)} ia={FormatSigned(reward.InvalidActionPenalty)}";
+    }
+
+    private static string NormalizeDecisionReason(string reason, bool maskFallback)
+    {
+        if (maskFallback && string.Equals(reason, "mask_fallback", StringComparison.Ordinal))
+            return "no_allowed_actions";
+        return reason;
+    }
+
+    private static string? ResolveSelfTalkSemanticEvent(bool enteredLoopTransition, bool loopTypeChangedTransition, bool recoveredLoopTransition, bool calmWindowEntered, string resetReason)
+    {
+        if (resetReason == "loop")
+            return "episode_loop_end";
+        if (enteredLoopTransition)
+            return "entered_loop";
+        if (loopTypeChangedTransition)
+            return "loop_type_changed";
+        if (recoveredLoopTransition)
+            return "recovered_from_loop";
+        if (calmWindowEntered)
+            return "entered_calm_window";
+        return null;
+    }
+
+    private static string FormatSigned(double value)
+    {
+        return value >= 0 ? $"+{value:0.00}" : $"{value:0.00}";
+    }
+
+    private static string NormalizeLoopType(string? loopType)
+    {
+        return string.IsNullOrWhiteSpace(loopType) ? "none" : loopType;
     }
 
     private string ResolveMlMode(MlConfig config)

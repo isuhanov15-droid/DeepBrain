@@ -3,8 +3,12 @@ using System.IO;
 using DeepBrain.Host.Brain;
 using DeepBrain.Host.Brain.Input;
 using DeepBrain.Host.BrainLife;
+using DeepBrain.Host.ConsoleUi;
+using DeepBrain.Host.Infrastructure;
 using DeepBrain.Host.Net;
+using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.Net;
+using DeepBrain.Shared.Trace;
 
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
@@ -21,6 +25,7 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
 
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+TryConfigureConsole();
 
 var inputStore = new InputStore();
 var brain = new BrainEngine(inputStore);
@@ -60,13 +65,18 @@ lifeLoop = new LifeLoop(
     new RewardEngine(),
     new LearningEngine(),
     configLoader,
-    (state, ct) => server.BroadcastLifeStateAsync(state, ct).GetAwaiter().GetResult(),
+    (state, ct) =>
+    {
+        server.BroadcastLifeStateAsync(state, ct).GetAwaiter().GetResult();
+        ui.UpdateState(state);
+        RenderScreen(ui, consoleLock);
+    },
     (trace, ct) =>
     {
         server.BroadcastTraceAsync(trace, ct).GetAwaiter().GetResult();
         var payload = JsonSerializer.Serialize(trace.Data, JsonWire.Options);
-        var line = $"[{DateTime.Now:HH:mm:ss}] life trace [{trace.Tick}] {trace.Stage}: {payload}";
-        traceWriter.AddLine(line);
+        var line = TraceFormatter.FormatCompact(trace);
+        traceWriter.AddLine($"[{DateTime.Now:HH:mm:ss}] trace [{trace.Tick}] {trace.Stage}: {payload}");
         if (Volatile.Read(ref traceEnabled) == 1)
         {
             ui.AddTrace(line);
@@ -97,7 +107,14 @@ try
     var brainTask = useLifeLoop && lifeLoop is not null
         ? lifeLoop.RunAsync(cts.Token)
         : RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
-    _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, configLoader, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
+    if (CanUseInteractiveConsoleInput())
+    {
+        _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, configLoader, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
+    }
+    else
+    {
+        LogLine(consoleLock, logBuffer, logWriter, "console command loop disabled: non-interactive input");
+    }
 
     await Task.WhenAll(heartbeatTask, brainTask);
 }
@@ -123,7 +140,7 @@ static async Task RunHeartbeatAsync(TcpBrainServer server, ConsoleUiState ui, Fu
         while (!ct.IsCancellationRequested)
         {
             var beat = pulse[idx++ % pulse.Length];
-            Console.Title = $"DeepBrain.Host {beat}";
+            TrySetConsoleTitle($"DeepBrain.Host {beat}");
             ui.Heartbeat = "";
             RenderScreen(ui, consoleLockProvider());
             // heartbeat only in title
@@ -161,8 +178,8 @@ static async Task RunBrainLoopAsync(
             {
                 await server.BroadcastTraceAsync(tr, ct);
                 var payload = JsonSerializer.Serialize(tr.Data, jsonOptions);
-                var traceLine = $"[{DateTime.Now:HH:mm:ss}] trace [{tr.Tick}] {tr.Stage}: {payload}";
-                traceWriter.AddLine(traceLine);
+                var traceLine = TraceFormatter.FormatCompact(tr);
+                traceWriter.AddLine($"[{DateTime.Now:HH:mm:ss}] trace [{tr.Tick}] {tr.Stage}: {payload}");
                 if (traceOn())
                 {
                     ui.AddTrace(traceLine);
@@ -321,38 +338,40 @@ static void RunCommandLoop(
 
 static void RenderScreen(ConsoleUiState ui, object consoleLock)
 {
+    if (!CanUseInteractiveConsoleOutput())
+        return;
+
     lock (consoleLock)
     {
-        var left = Console.CursorLeft;
-        var top = Console.CursorTop;
-
-        var width = Math.Max(10, Console.WindowWidth);
-        var height = Math.Max(6, Console.WindowHeight);
-        var traceHeight = Math.Max(3, Math.Min(10, height - 4));
-
-        Console.SetCursorPosition(0, 0);
-        WritePadded(ui.Heartbeat, width);
-
-        Console.SetCursorPosition(0, 1);
-        WritePadded("Trace:", width);
-
-        var lines = ui.GetTraceSnapshot(traceHeight);
-        for (var i = 0; i < traceHeight; i++)
+        try
         {
-            Console.SetCursorPosition(0, 2 + i);
-            var line = i < lines.Count ? lines[i] : "";
-            WritePadded(line, width);
-        }
+            var width = GetConsoleWidthSafe();
+            var height = GetConsoleHeightSafe();
+            var frame = ui.BuildFrame(width, height);
+            if (!ui.TrySetFrame(frame))
+                return;
 
-        Console.SetCursorPosition(0, Math.Max(0, height - 1));
+            for (var i = 0; i < frame.Count; i++)
+            {
+                Console.SetCursorPosition(0, i);
+                WritePadded(frame[i], width);
+            }
+
+            Console.SetCursorPosition(0, Math.Max(0, Math.Min(frame.Count, height - 1)));
+        }
+        catch (IOException)
+        {
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+        }
     }
 }
 
 static void WritePadded(string text, int width)
 {
-    if (text.Length > width - 1)
-        text = text[..(width - 1)];
-    Console.Write(text.PadRight(width - 1));
+    var safeWidth = Math.Max(8, width - 1);
+    Console.Write(ConsoleLineFormatter.FitToWidth(text, safeWidth).PadRight(safeWidth));
 }
 
 static void LogLine(object consoleLock, List<string> buffer, FileBatchWriter logWriter, string message)
@@ -377,14 +396,97 @@ static void DumpLogs(object consoleLock, List<string> buffer)
     }
 }
 
+static void TryConfigureConsole()
+{
+    try
+    {
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        Console.InputEncoding = new System.Text.UTF8Encoding(false);
+    }
+    catch
+    {
+    }
+}
+
+static bool CanUseInteractiveConsoleOutput()
+{
+    try
+    {
+        return !Console.IsOutputRedirected;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static bool CanUseInteractiveConsoleInput()
+{
+    try
+    {
+        return !Console.IsInputRedirected;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static int GetConsoleWidthSafe()
+{
+    try
+    {
+        return Math.Max(8, Console.WindowWidth);
+    }
+    catch
+    {
+        return 120;
+    }
+}
+
+static int GetConsoleHeightSafe()
+{
+    try
+    {
+        return Math.Max(1, Console.WindowHeight);
+    }
+    catch
+    {
+        return 24;
+    }
+}
+
+static void TrySetConsoleTitle(string title)
+{
+    if (!CanUseInteractiveConsoleOutput())
+        return;
+
+    try
+    {
+        Console.Title = title;
+    }
+    catch
+    {
+    }
+}
+
 sealed class ConsoleUiState
 {
     private readonly List<string> _trace = new(200);
+    private readonly List<string> _lastFrame = new();
+    private LifeStateDto? _lastState;
 
     public string Heartbeat { get; set; } = "Heartbeat: _/\\_";
 
+    public void UpdateState(LifeStateDto state)
+    {
+        _lastState = state;
+    }
+
     public void AddTrace(string line)
     {
+        if (_trace.Count > 0 && string.Equals(_trace[^1], line, StringComparison.Ordinal))
+            return;
         if (_trace.Count >= 200) _trace.RemoveAt(0);
         _trace.Add(line);
     }
@@ -393,6 +495,54 @@ sealed class ConsoleUiState
     {
         var take = Math.Min(maxLines, _trace.Count);
         return _trace.Skip(_trace.Count - take).ToList();
+    }
+
+    public List<string> BuildFrame(int width, int height)
+    {
+        var safeHeight = Math.Max(1, height);
+        var lines = new List<string>(safeHeight)
+        {
+            Heartbeat,
+            ConsoleLineFormatter.FormatTickLine(_lastState),
+            ConsoleLineFormatter.FormatDecisionLine(_lastState),
+            ConsoleLineFormatter.FormatRewardLine(_lastState),
+            ConsoleLineFormatter.FormatEpisodeLine(_lastState),
+            ConsoleLineFormatter.FormatScenarioLine(_lastState),
+            "Trace:"
+        };
+
+        var traceHeight = Math.Max(0, safeHeight - lines.Count);
+        lines.AddRange(GetTraceSnapshot(traceHeight));
+        if (lines.Count > safeHeight)
+            lines = lines.Take(safeHeight).ToList();
+
+        while (lines.Count < safeHeight)
+            lines.Add(string.Empty);
+
+        return lines.Select(line => ConsoleLineFormatter.FitToWidth(line, Math.Max(8, width - 1))).ToList();
+    }
+
+    public bool TrySetFrame(List<string> frame)
+    {
+        if (_lastFrame.Count == frame.Count)
+        {
+            var changed = false;
+            for (var i = 0; i < frame.Count; i++)
+            {
+                if (!string.Equals(_lastFrame[i], frame[i], StringComparison.Ordinal))
+                {
+                    changed = true;
+                    break;
+                }
+            }
+
+            if (!changed)
+                return false;
+        }
+
+        _lastFrame.Clear();
+        _lastFrame.AddRange(frame);
+        return true;
     }
 }
 
@@ -405,11 +555,10 @@ sealed class FileBatchWriter
     public FileBatchWriter(string folderName, string filePrefix, DateTime startTime)
     {
         var baseDir = AppContext.BaseDirectory;
-        var dir = Path.Combine(baseDir, folderName);
+        var dir = HostPaths.GetDataDirectory(baseDir, folderName);
         Directory.CreateDirectory(dir);
-        var fileName = $"{filePrefix}-{startTime:yyyyMMdd-HHmmss}.log";
-        _filePath = Path.Combine(dir, fileName);
-        File.AppendAllText(_filePath, $"=== DeepBrain.Host started {startTime:yyyy-MM-dd HH:mm:ss} ==={Environment.NewLine}");
+        _filePath = HostPaths.GetLogFilePath(baseDir, folderName, filePrefix, startTime);
+        File.AppendAllText(_filePath, $"=== DeepBrain.Host started {startTime:yyyy-MM-dd HH:mm:ss} ==={Environment.NewLine}", new System.Text.UTF8Encoding(false));
     }
 
     public void AddLine(string line)
@@ -435,7 +584,7 @@ sealed class FileBatchWriter
     private void FlushLocked()
     {
         if (_buffer.Count == 0) return;
-        File.AppendAllLines(_filePath, _buffer);
+        File.AppendAllLines(_filePath, _buffer, new System.Text.UTF8Encoding(false));
         _buffer.Clear();
     }
 }

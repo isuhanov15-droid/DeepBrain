@@ -29,6 +29,8 @@ public sealed class LoopDetectorTests
         Assert.True(loop.IsLoopDetected);
         Assert.Equal("repeat", loop.LoopType);
         Assert.True(loop.LoopStrength > 0.5);
+        Assert.True(loop.EnteredLoop);
+        Assert.True(loop.IsInLoop);
     }
 
     [Fact]
@@ -55,5 +57,24 @@ public sealed class LoopDetectorTests
 
         Assert.True(loop.IsLoopDetected);
         Assert.Equal("abab", loop.LoopType);
+    }
+
+    [Fact]
+    public void RecoveryTransitionIsReportedWhenPatternStops()
+    {
+        var loop = new LoopDetector();
+        loop.Configure(window: 32, sameK: 4, altK: 3);
+
+        for (var i = 0; i < 4; i++)
+        {
+            loop.Update("rest_short", "calm", 0.2, 0.8, 0.2, "energy_conservation", "morning", "body", 0.01, i);
+        }
+
+        Assert.True(loop.IsInLoop);
+
+        loop.Update("focus_widen", "curious", 0.3, 0.7, 0.3, "exploration", "morning", "novelty", 0.02, 10);
+
+        Assert.False(loop.IsInLoop);
+        Assert.True(loop.RecoveredFromLoop);
     }
 }

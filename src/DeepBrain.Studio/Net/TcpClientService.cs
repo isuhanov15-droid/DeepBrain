@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using DeepBrain.Shared.Net;
 using DeepBrain.Shared.Input;
 using DeepBrain.Shared.Brain;
+using DeepBrain.Shared.Trace;
 using System.Text.Json;
 
 namespace DeepBrain.Studio.Net;
@@ -161,7 +162,8 @@ public sealed class TcpClientService : IAsyncDisposable
                 break;
 
             case Msg.TraceAppend:
-                OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] trace: {env.Payload}");
+                var trace = PayloadReader.Read<TraceDto>(env.Payload);
+                OnTrace?.Invoke($"[{DateTime.Now:HH:mm:ss}] {TraceFormatter.FormatCompact(trace)}");
                 break;
             }
         }
@@ -186,7 +188,6 @@ public sealed class TcpClientService : IAsyncDisposable
     }
 
     private static char GetHex(int v) => (char)(v < 10 ? '0' + v : 'A' + (v - 10));
-
 
     private async Task SendAsync(Envelope env, CancellationToken ct)
     {

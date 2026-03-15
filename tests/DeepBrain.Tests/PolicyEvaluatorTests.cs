@@ -23,7 +23,14 @@ public sealed class PolicyEvaluatorTests
         var snapshot = evaluator.Snapshot(isEvaluation: true);
         Assert.Equal(2, snapshot.EpisodeCount);
         Assert.True(snapshot.LoopRate > 0);
-        Assert.True(snapshot.MeanReward < 1.0);
+        Assert.True(snapshot.AvgReward < 1.0);
+        Assert.InRange(snapshot.CalmRatio, 0.0, 1.0);
+        Assert.InRange(snapshot.AnxiousRatio, 0.0, 1.0);
+        Assert.InRange(snapshot.CuriousRatio, 0.0, 1.0);
+        Assert.InRange(snapshot.ActionDiversity, 0.0, 1.0);
+        Assert.True(snapshot.CalmCount >= 0);
+        Assert.True(snapshot.AnxiousCount >= 0);
+        Assert.True(snapshot.CuriousCount >= 0);
     }
 
     private static EpisodeReport BuildReport(int steps, double totalReward, int loopCount, Dictionary<string, int> moods)

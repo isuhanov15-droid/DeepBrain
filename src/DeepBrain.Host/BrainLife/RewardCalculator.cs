@@ -17,10 +17,11 @@ public sealed class RewardCalculator
         HomeostasisDto after,
         string actionName,
         AppraisalDto appraisal,
+        bool isInLoop,
         double loopStrength,
         bool invalidAction,
         RewardConfig config)
     {
-        return _engine.Compute(before, after, actionName, appraisal, loopStrength, invalidAction, config);
+        return _engine.Compute(before, after, actionName, appraisal, isInLoop, loopStrength, invalidAction, config);
     }
 }

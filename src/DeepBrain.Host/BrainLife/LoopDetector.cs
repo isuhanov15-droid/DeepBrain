@@ -21,13 +21,19 @@ public sealed class LoopDetector
     public string LastAction { get; private set; } = "none";
     public int SameActionStreak { get; private set; }
     public double AvgRewardShort { get; private set; }
-    public int LoopCount { get; private set; }
+    public int LoopObservedCount { get; private set; }
+    public int LoopCount => LoopObservedCount;
     public double LoopPenalty { get; private set; }
     public string LoopType { get; private set; } = "none";
     public bool IsLoopDetected { get; private set; }
+    public bool IsInLoop { get; private set; }
     public bool IsHeavyLoop { get; private set; }
     public double LoopStrength { get; private set; }
     public int Streak { get; private set; }
+    public bool EnteredLoop { get; private set; }
+    public bool LoopTypeChanged { get; private set; }
+    public bool RecoveredFromLoop { get; private set; }
+    public bool LoopEscalated { get; private set; }
 
     public void Configure(int window, int sameK, int altK)
     {
@@ -48,6 +54,14 @@ public sealed class LoopDetector
         double reward,
         long tick)
     {
+        EnteredLoop = false;
+        LoopTypeChanged = false;
+        RecoveredFromLoop = false;
+        LoopEscalated = false;
+        var previousType = LoopType;
+        var previousStrength = LoopStrength;
+        var previousInLoop = IsInLoop;
+
         if (actionName == LastAction)
             SameActionStreak++;
         else
@@ -109,14 +123,15 @@ public sealed class LoopDetector
         }
 
         IsLoopDetected = LoopType != "none";
+        IsInLoop = IsLoopDetected;
         IsHeavyLoop = LoopStrength >= 0.85;
-        LoopPenalty = LifeMath.Clamp01(LoopStrength);
+        LoopPenalty = IsInLoop ? LifeMath.Clamp01(LoopStrength) : 0.0;
 
-        if (IsLoopDetected)
+        if (IsInLoop)
         {
             if (!_inLoop)
             {
-                LoopCount++;
+                LoopObservedCount++;
                 _inLoop = true;
             }
         }
@@ -124,6 +139,11 @@ public sealed class LoopDetector
         {
             _inLoop = false;
         }
+
+        EnteredLoop = !previousInLoop && IsInLoop;
+        RecoveredFromLoop = previousInLoop && !IsInLoop;
+        LoopTypeChanged = IsInLoop && previousInLoop && previousType != LoopType;
+        LoopEscalated = IsInLoop && previousStrength < 0.85 && LoopStrength >= 0.85;
     }
 
     public bool ShouldAnnounceLoop(long tick)
@@ -142,13 +162,18 @@ public sealed class LoopDetector
         _stateKeys.Clear();
         SameActionStreak = 0;
         AvgRewardShort = 0;
-        LoopCount = 0;
+        LoopObservedCount = 0;
         LoopPenalty = 0;
         LoopType = "none";
         IsLoopDetected = false;
+        IsInLoop = false;
         IsHeavyLoop = false;
         LoopStrength = 0;
         Streak = 0;
+        EnteredLoop = false;
+        LoopTypeChanged = false;
+        RecoveredFromLoop = false;
+        LoopEscalated = false;
         _repeatStreak = 0;
         _stateStreak = 0;
         _lastFingerprint = "";

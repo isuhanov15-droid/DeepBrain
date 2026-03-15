@@ -20,10 +20,17 @@ public sealed record BrainConfig(
     double EpsilonMin = 0.05,
     double EpsilonDecay = 0.0005,
     double LoopThreshold = 0.85,
-    int SelfTalkCooldown = 40,
+    int SelfTalkCooldown = 120,
     RewardWeightsConfig? RewardWeights = null,
     string ScenarioDefault = "calm_baseline",
-    string CurriculumMode = "round_robin")
+    string CurriculumMode = "round_robin",
+    int SelfTalkRepeatCooldownTicks = 900,
+    int SelfTalkSemanticCooldownTicks = 600,
+    double SelfTalkLoopMinStrength = 0.65,
+    double SelfTalkRecoveryThreshold = 0.35,
+    int SelfTalkLoopHoldTicks = 5,
+    int SelfTalkRecoveryHoldTicks = 5,
+    int SelfTalkCalmWindowHoldTicks = 3)
 {
     public static BrainConfig Default => new(
         new WorldConfig(
@@ -86,6 +93,7 @@ public sealed record BrainConfig(
             ExploreWeight: 1.0,
             SocialWeight: 1.0,
             LoopPenaltyWeight: 0.05,
+            LoopPenaltyThreshold: 0.35,
             InvalidActionPenalty: 0.05,
             ExploreBase: 0.01,
             SocialBase: 0.01
@@ -226,7 +234,14 @@ public sealed record BrainConfig(
             InvalidActionPenalty: 0.05
         ),
         ScenarioDefault: "calm_baseline",
-        CurriculumMode: "round_robin"
+        CurriculumMode: "round_robin",
+        SelfTalkRepeatCooldownTicks: 300,
+        SelfTalkSemanticCooldownTicks: 180,
+        SelfTalkLoopMinStrength: 0.65,
+        SelfTalkRecoveryThreshold: 0.35,
+        SelfTalkLoopHoldTicks: 3,
+        SelfTalkRecoveryHoldTicks: 3,
+        SelfTalkCalmWindowHoldTicks: 3
     );
 }
 
@@ -295,6 +310,7 @@ public sealed record RewardConfig(
     double ExploreWeight,
     double SocialWeight,
     double LoopPenaltyWeight,
+    double LoopPenaltyThreshold,
     double InvalidActionPenalty,
     double ExploreBase,
     double SocialBase

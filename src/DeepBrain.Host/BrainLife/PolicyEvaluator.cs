@@ -44,7 +44,7 @@ public sealed class PolicyEvaluator
     {
         var list = reports.ToList();
         if (list.Count == 0)
-            return new EvaluationSnapshot(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new EvaluationSnapshot(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
         var rewards = list.Select(r => r.TotalReward).ToList();
         rewards.Sort();
@@ -70,10 +70,13 @@ public sealed class PolicyEvaluator
                 moodCounts[kv.Key] = moodCounts.TryGetValue(kv.Key, out var count) ? count + kv.Value : kv.Value;
         }
 
-        var actionDiversity = totalSteps > 0 ? actionCounts.Count / (double)totalSteps : 0.0;
-        var calmRatio = totalSteps > 0 && moodCounts.TryGetValue("calm", out var calm) ? calm / (double)totalSteps : 0.0;
-        var anxiousRatio = totalSteps > 0 && moodCounts.TryGetValue("anxious", out var anx) ? anx / (double)totalSteps : 0.0;
-        var curiousRatio = totalSteps > 0 && moodCounts.TryGetValue("curious", out var cur) ? cur / (double)totalSteps : 0.0;
+        var actionDiversity = totalSteps > 0 ? Math.Clamp(actionCounts.Count / (double)totalSteps, 0.0, 1.0) : 0.0;
+        var calmCount = moodCounts.TryGetValue("calm", out var calm) ? calm : 0;
+        var anxiousCount = moodCounts.TryGetValue("anxious", out var anx) ? anx : 0;
+        var curiousCount = moodCounts.TryGetValue("curious", out var cur) ? cur : 0;
+        var calmRatio = totalSteps > 0 ? Math.Clamp(calmCount / (double)totalSteps, 0.0, 1.0) : 0.0;
+        var anxiousRatio = totalSteps > 0 ? Math.Clamp(anxiousCount / (double)totalSteps, 0.0, 1.0) : 0.0;
+        var curiousRatio = totalSteps > 0 ? Math.Clamp(curiousCount / (double)totalSteps, 0.0, 1.0) : 0.0;
         var invalidRate = totalSteps > 0 ? invalidCount / (double)totalSteps : 0.0;
         var maskFallbackRate = totalSteps > 0 ? maskFallbackCount / (double)totalSteps : 0.0;
 
@@ -92,13 +95,17 @@ public sealed class PolicyEvaluator
             curiousRatio,
             invalidRate,
             maskFallbackRate,
-            list.Count
+            list.Count,
+            calmCount,
+            anxiousCount,
+            curiousCount,
+            loopEpisodes
         );
     }
 }
 
 public sealed record EvaluationSnapshot(
-    double MeanReward,
+    double AvgReward,
     double MedianReward,
     double SuccessRate,
     double AvgEpisodeLength,
@@ -109,5 +116,9 @@ public sealed record EvaluationSnapshot(
     double CuriousRatio,
     double InvalidActionRate,
     double MaskFallbackRate,
-    int EpisodeCount
+    int EpisodeCount,
+    int CalmCount,
+    int AnxiousCount,
+    int CuriousCount,
+    int LoopCount
 );

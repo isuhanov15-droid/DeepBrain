@@ -150,7 +150,11 @@ public partial class MainWindow : Window
         }
         if (state.Evaluation is not null)
         {
-            LifeEvalText.Text = $"eval: reward={state.Evaluation.MeanReward:0.000} loops={state.Evaluation.LoopRate:0.00} diversity={state.Evaluation.ActionDiversity:0.00} calm={state.Evaluation.CalmRatio:0.00} anxious={state.Evaluation.AnxiousRatio:0.00}";
+            var calmRatio = ClampRatio(state.Evaluation.CalmRatio);
+            var anxiousRatio = ClampRatio(state.Evaluation.AnxiousRatio);
+            var curiousRatio = ClampRatio(state.Evaluation.CuriousRatio);
+            var diversity = ClampRatio(state.Evaluation.ActionDiversity);
+            LifeEvalText.Text = $"eval: reward={state.Evaluation.AvgReward:0.000} loops={Math.Max(0, state.Evaluation.LoopCount)} diversity={diversity:0.00} calm={calmRatio:0.00} anxious={anxiousRatio:0.00} curious={curiousRatio:0.00}";
         }
         else
         {
@@ -159,7 +163,14 @@ public partial class MainWindow : Window
         var policy = state.Policy;
         LifeStrategyText.Text = $"strategy={policy?.Strategy ?? "n/a"} reason={policy?.Reason ?? ""}";
         LifeDriveText.Text = $"drive={state.DominantDrive}";
-        LifeLoopText.Text = $"loopPenalty={policy?.LoopPenalty:0.00} streak={policy?.SameActionStreak} loops={policy?.LoopCount}";
+        if (state.LoopInfo is not null)
+        {
+            LifeLoopText.Text = $"loop: in={state.LoopInfo.IsInLoop} type={state.LoopInfo.Type} strength={state.LoopInfo.Strength:0.00} count={state.LoopInfo.ObservedCount} penalty={state.LoopInfo.CurrentPenalty:0.00}";
+        }
+        else
+        {
+            LifeLoopText.Text = $"loop: in=false type=none strength=0.00 count={policy?.LoopCount ?? 0} penalty={Math.Abs(state.Reward?.LoopPenalty ?? 0):0.00}";
+        }
         LifeAvgRewardText.Text = $"avgRewardShort={policy?.AvgRewardShort:0.000}";
         LifeInertiaText.Text = $"moodInertia={state.MoodInertia:0.00}";
         if (state.Circadian is not null)
@@ -259,7 +270,7 @@ public partial class MainWindow : Window
 
         if (state.Stats is not null)
         {
-            LifeStatsText.Text = $"stats=anx:{state.Stats.AnxiousPct:0.00} calm:{state.Stats.CalmPct:0.00} cur:{state.Stats.CuriousPct:0.00} p95pain:{state.Stats.P95Pain:0.00}";
+            LifeStatsText.Text = $"stats=anxScore:{ClampRatio(state.Stats.AnxiousScore):0.00} calmScore:{ClampRatio(state.Stats.CalmScore):0.00} curiousScore:{ClampRatio(state.Stats.CuriousScore):0.00} p95pain:{state.Stats.P95Pain:0.00}";
         }
         else
         {
@@ -323,6 +334,14 @@ public partial class MainWindow : Window
             StatusText.Text = $"error: {ex.Message}";
             AddLog($"error: {ex.Message}");
         }
+    }
+
+    private static double ClampRatio(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+            return 0.0;
+
+        return Math.Clamp(value, 0.0, 1.0);
     }
 
     private static void Ui(Action a) => Dispatcher.UIThread.Post(a);

@@ -10,6 +10,7 @@ public sealed class RewardEngine
         HomeostasisDto after,
         string actionName,
         AppraisalDto appraisal,
+        bool isInLoop,
         double loopStrength,
         bool invalidAction,
         RewardConfig config)
@@ -32,7 +33,9 @@ public sealed class RewardEngine
             social = config.SocialBase + appraisal.Social * 0.02;
         social *= config.SocialWeight;
 
-        var loopPenalty = -LifeMath.Clamp01(loopStrength) * config.LoopPenaltyWeight;
+        var loopPenalty = isInLoop && loopStrength >= config.LoopPenaltyThreshold
+            ? -LifeMath.Clamp01(loopStrength) * config.LoopPenaltyWeight
+            : 0.0;
         var invalidPenalty = invalidAction ? -Math.Abs(config.InvalidActionPenalty) : 0.0;
 
         var total = homeostasis + explore + social + loopPenalty + invalidPenalty;

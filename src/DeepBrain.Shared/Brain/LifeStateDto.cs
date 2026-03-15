@@ -38,5 +38,6 @@ public sealed record LifeStateDto(
     [property: JsonPropertyName("decision")] DecisionDto? Decision = null,
     [property: JsonPropertyName("scenarioState")] ScenarioDto? ScenarioState = null,
     [property: JsonPropertyName("curriculum")] CurriculumStateDto? Curriculum = null,
-    [property: JsonPropertyName("tickInfo")] TickInfoDto? TickInfo = null
+    [property: JsonPropertyName("tickInfo")] TickInfoDto? TickInfo = null,
+    [property: JsonPropertyName("loopInfo")] LoopInfoDto? LoopInfo = null
 );

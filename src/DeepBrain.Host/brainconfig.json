@@ -4,7 +4,14 @@
   "epsilonMin": 0.05,
   "epsilonDecay": 0.0005,
   "loopThreshold": 0.85,
-  "selfTalkCooldown": 40,
+  "selfTalkCooldown": 120,
+  "selfTalkRepeatCooldownTicks": 900,
+  "selfTalkSemanticCooldownTicks": 600,
+  "selfTalkLoopMinStrength": 0.65,
+  "selfTalkRecoveryThreshold": 0.35,
+  "selfTalkLoopHoldTicks": 5,
+  "selfTalkRecoveryHoldTicks": 5,
+  "selfTalkCalmWindowHoldTicks": 3,
   "rewardWeights": {
     "homeostasis": 1.0,
     "explore": 1.0,
@@ -74,6 +81,7 @@
     "exploreWeight": 1.0,
     "socialWeight": 1.0,
     "loopPenaltyWeight": 0.05,
+    "loopPenaltyThreshold": 0.35,
     "invalidActionPenalty": 0.05,
     "exploreBase": 0.01,
     "socialBase": 0.01
