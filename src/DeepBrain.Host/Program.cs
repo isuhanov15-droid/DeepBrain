@@ -26,6 +26,7 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 TryConfigureConsole();
+var consoleOptions = HostConsoleOptions.Parse(args);
 
 var inputStore = new InputStore();
 var brain = new BrainEngine(inputStore);
@@ -51,6 +52,8 @@ var traceEnabled = 0;
 var consoleLock = new object();
 var logBuffer = new List<string>(500);
 var ui = new ConsoleUiState();
+HostConsoleRuntime.Configure(consoleOptions, ui);
+LogLine(consoleLock, logBuffer, logWriter, $"console mode: {HostConsoleRuntime.Mode}, dashboard fps: {consoleOptions.DashboardFps}");
 var configPath = Path.Combine(AppContext.BaseDirectory, "brainconfig.json");
 var configLoader = new BrainConfigLoader(configPath, msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
@@ -107,7 +110,7 @@ try
     var brainTask = useLifeLoop && lifeLoop is not null
         ? lifeLoop.RunAsync(cts.Token)
         : RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
-    if (CanUseInteractiveConsoleInput())
+    if (HostConsoleRuntime.Mode != HostConsoleMode.Quiet && CanUseInteractiveConsoleInput())
     {
         _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, configLoader, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
     }
@@ -338,6 +341,12 @@ static void RunCommandLoop(
 
 static void RenderScreen(ConsoleUiState ui, object consoleLock)
 {
+    if (HostConsoleRuntime.Mode != HostConsoleMode.Dashboard)
+        return;
+
+    if (!HostConsoleRuntime.ShouldRender())
+        return;
+
     if (!CanUseInteractiveConsoleOutput())
         return;
 
@@ -380,8 +389,19 @@ static void LogLine(object consoleLock, List<string> buffer, FileBatchWriter log
     {
         if (buffer.Count >= 500) buffer.RemoveAt(0);
         buffer.Add(message);
-        Console.WriteLine(message);
         logWriter.AddLine(message);
+
+        switch (HostConsoleRuntime.Mode)
+        {
+            case HostConsoleMode.Dashboard:
+                HostConsoleRuntime.Ui?.AddLog(message);
+                break;
+            case HostConsoleMode.Logs:
+                Console.WriteLine(message);
+                break;
+            case HostConsoleMode.Quiet:
+                break;
+        }
     }
 }
 
@@ -473,6 +493,7 @@ static void TrySetConsoleTitle(string title)
 sealed class ConsoleUiState
 {
     private readonly List<string> _trace = new(200);
+    private readonly List<string> _logs = new(200);
     private readonly List<string> _lastFrame = new();
     private LifeStateDto? _lastState;
 
@@ -489,6 +510,20 @@ sealed class ConsoleUiState
             return;
         if (_trace.Count >= 200) _trace.RemoveAt(0);
         _trace.Add(line);
+    }
+
+    public void AddLog(string line)
+    {
+        if (_logs.Count > 0 && string.Equals(_logs[^1], line, StringComparison.Ordinal))
+            return;
+        if (_logs.Count >= 200) _logs.RemoveAt(0);
+        _logs.Add(line);
+    }
+
+    public List<string> GetLogSnapshot(int maxLines)
+    {
+        var take = Math.Min(maxLines, _logs.Count);
+        return _logs.Skip(_logs.Count - take).ToList();
     }
 
     public List<string> GetTraceSnapshot(int maxLines)
@@ -508,8 +543,12 @@ sealed class ConsoleUiState
             ConsoleLineFormatter.FormatRewardLine(_lastState),
             ConsoleLineFormatter.FormatEpisodeLine(_lastState),
             ConsoleLineFormatter.FormatScenarioLine(_lastState),
-            "Trace:"
+            "Logs:"
         };
+
+        var logHeight = Math.Min(5, Math.Max(0, safeHeight - lines.Count - 1));
+        lines.AddRange(GetLogSnapshot(logHeight));
+        lines.Add("Trace:");
 
         var traceHeight = Math.Max(0, safeHeight - lines.Count);
         lines.AddRange(GetTraceSnapshot(traceHeight));
@@ -586,5 +625,112 @@ sealed class FileBatchWriter
         if (_buffer.Count == 0) return;
         File.AppendAllLines(_filePath, _buffer, new System.Text.UTF8Encoding(false));
         _buffer.Clear();
+    }
+}
+
+
+enum HostConsoleMode
+{
+    Dashboard,
+    Logs,
+    Quiet
+}
+
+sealed class HostConsoleOptions
+{
+    public HostConsoleMode Mode { get; init; }
+    public int DashboardFps { get; init; } = 2;
+
+    public static HostConsoleOptions Parse(string[] args)
+    {
+        var modeText = Environment.GetEnvironmentVariable("DEEPBRAIN_CONSOLE");
+        var fps = 2;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+
+            if (string.Equals(arg, "--console", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                modeText = args[++i];
+                continue;
+            }
+
+            if (arg.StartsWith("--console=", StringComparison.OrdinalIgnoreCase))
+            {
+                modeText = arg["--console=".Length..];
+                continue;
+            }
+
+            if (string.Equals(arg, "--dashboard-fps", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                if (int.TryParse(args[++i], out var parsedFps))
+                    fps = parsedFps;
+                continue;
+            }
+
+            if (arg.StartsWith("--dashboard-fps=", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(arg["--dashboard-fps=".Length..], out var parsedFps))
+                    fps = parsedFps;
+            }
+        }
+
+        var fpsEnv = Environment.GetEnvironmentVariable("DEEPBRAIN_DASHBOARD_FPS");
+        if (!string.IsNullOrWhiteSpace(fpsEnv) && int.TryParse(fpsEnv, out var envFps))
+            fps = envFps;
+
+        var mode = ParseMode(modeText);
+        fps = Math.Clamp(fps, 1, 10);
+
+        return new HostConsoleOptions
+        {
+            Mode = mode,
+            DashboardFps = fps
+        };
+    }
+
+    private static HostConsoleMode ParseMode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Console.IsOutputRedirected ? HostConsoleMode.Logs : HostConsoleMode.Dashboard;
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "dashboard" => HostConsoleMode.Dashboard,
+            "dash" => HostConsoleMode.Dashboard,
+            "logs" => HostConsoleMode.Logs,
+            "log" => HostConsoleMode.Logs,
+            "quiet" => HostConsoleMode.Quiet,
+            "silent" => HostConsoleMode.Quiet,
+            _ => Console.IsOutputRedirected ? HostConsoleMode.Logs : HostConsoleMode.Dashboard
+        };
+    }
+}
+
+static class HostConsoleRuntime
+{
+    private static long _lastRenderMs;
+
+    public static HostConsoleMode Mode { get; private set; } = HostConsoleMode.Dashboard;
+    public static int DashboardMinIntervalMs { get; private set; } = 500;
+    public static ConsoleUiState? Ui { get; private set; }
+
+    public static void Configure(HostConsoleOptions options, ConsoleUiState ui)
+    {
+        Mode = options.Mode;
+        Ui = ui;
+        DashboardMinIntervalMs = Math.Max(100, 1000 / Math.Max(1, options.DashboardFps));
+    }
+
+    public static bool ShouldRender()
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref _lastRenderMs);
+
+        if (now - last < DashboardMinIntervalMs)
+            return false;
+
+        return Interlocked.CompareExchange(ref _lastRenderMs, now, last) == last;
     }
 }
