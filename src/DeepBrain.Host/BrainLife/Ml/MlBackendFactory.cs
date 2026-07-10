@@ -16,7 +16,7 @@ public static class MlBackendFactory
             return new LocalCoreBackend(config, log);
 #endif
 
-        log($"warn: ML backend '{backend}' not available, falling back to stub");
+        log($"Предупреждение: ML backend '{backend}' недоступен; используется заглушка");
         return new StubBackend();
     }
 }

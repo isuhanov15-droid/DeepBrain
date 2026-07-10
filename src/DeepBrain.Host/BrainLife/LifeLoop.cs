@@ -5,6 +5,7 @@ using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.BrainDtos.V4;
 using DeepBrain.Shared.BrainDtos.V5;
 using DeepBrain.Shared.BrainDtos.V6;
+using DeepBrain.Shared.Localization;
 using DeepBrain.Shared.Trace;
 
 namespace DeepBrain.Host.BrainLife;
@@ -172,7 +173,7 @@ public sealed class LifeLoop
         _ml.ResetCounters();
         _mlLoaded = true;
         TryDeleteCheckpoint(mlCfg.CheckpointPath);
-        _log("ML reset");
+        _log("ML сброшен");
     }
 
     public void RequestEpisodeReset()
@@ -209,7 +210,13 @@ public sealed class LifeLoop
         var mlMode = ResolveMlMode(mlCfg);
         var trainEnabled = mlMode != "evaluation" && enabled;
         var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount);
-        return $"enable={enabled} backendKind={t.BackendKind} coreAvailable={t.CoreAvailable} remoteConnected={t.RemoteConnected} rttMs={t.RttMs:0} lastError={t.LastRemoteError ?? "n/a"} reasonIfDisabled={reason ?? "n/a"}";
+        return $"включён={RussianDisplay.YesNo(enabled)} " +
+               $"backend={RussianDisplay.Token(t.BackendKind)} " +
+               $"ядро доступно={RussianDisplay.YesNo(t.CoreAvailable)} " +
+               $"удалённое соединение={RussianDisplay.YesNo(t.RemoteConnected)} " +
+               $"RTT={t.RttMs:0} мс " +
+               $"последняя ошибка={RussianDisplay.Token(t.LastRemoteError)} " +
+               $"причина отключения={RussianDisplay.Token(reason)}";
     }
 
     public bool TryConnectMl() => _ml.TryConnectRemote();
@@ -316,7 +323,7 @@ public sealed class LifeLoop
         var (mlEnabled, disableReason) = ComputeMlEnabled(mlConfig, backendKind, mlConfig.RemoteStrict, remoteConnected);
         if (!mlEnabled && disableReason?.Contains("ML.Core not linked") == true && !_mlCoreMissingLogged)
         {
-            _log("WARN: ML.Core not linked, ml.enable forced false");
+            _log("Предупреждение: ML.Core не подключён; ml.enable принудительно отключён");
             _mlCoreMissingLogged = true;
         }
         mlConfig = mlConfig with { Enable = mlEnabled };
@@ -329,7 +336,7 @@ public sealed class LifeLoop
             if (_ml.TryLoad(mlConfig.CheckpointPath, out var loadedEpisodeId))
             {
                 _episode.SetEpisodeId(loadedEpisodeId);
-                _log($"ML policy loaded: {mlConfig.CheckpointPath}");
+                _log($"Политика ML загружена: {mlConfig.CheckpointPath}");
             }
             _mlLoaded = true;
         }
@@ -341,10 +348,10 @@ public sealed class LifeLoop
         if (_sleep.EnteredSleep)
         {
             _sleepConsolidated = false;
-            _log("ENTER SLEEP");
+            _log("ПЕРЕХОД В СОН");
         }
         if (_sleep.WokeUp)
-            _log("WAKE UP");
+            _log("ПРОБУЖДЕНИЕ");
 
         if (_sleep.IsSleeping)
         {
@@ -419,7 +426,7 @@ public sealed class LifeLoop
                 new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
                 new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
             );
-            EmitTrace("tick", $"tick={_tick} ep={_episode.EpisodeId} act=sleep reward=0.000 loop=none eps=0.000", ct);
+            EmitTrace("tick", $"тик={_tick} эпизод={_episode.EpisodeId} действие=сон награда=0.000 петля=нет ε=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
             return;
@@ -429,7 +436,7 @@ public sealed class LifeLoop
         var preInstincts = _instincts.Compute(_homeo, _world, config.Drives);
         var newEvents = _world.Tick(_tick, circ.Phase, circ.SleepPressure, _sleep.IsSleeping, dtSeconds, preInstincts.Attachment, worldConfig);
         foreach (var ev in newEvents)
-            _log($"EVENT: {ev.Type} {ev.Severity:0.00} {ev.Payload}");
+            _log($"СОБЫТИЕ: {RussianDisplay.Token(ev.Type)} {ev.Severity:0.00} {RussianDisplay.Token(ev.Payload)}");
         foreach (var ev in newEvents)
             _eventCounts[ev.Type] = _eventCounts.TryGetValue(ev.Type, out var count) ? count + 1 : 1;
         var recentEvents = _world.Events.GetRecent(5);
@@ -471,9 +478,11 @@ public sealed class LifeLoop
             goals = ApplyExploreRebound(goals);
         var activePlan = _plan.Update(goals, dominantDrive, _loop.LoopPenalty, _sleep.IsSleeping, instincts.SelfPreservation);
         if (_plan.Created)
-            _log($"PLAN CREATED: {activePlan?.Strategy} goal={activePlan?.GoalId} ttl={activePlan?.RemainingTicks}");
+            _log($"ПЛАН СОЗДАН: {RussianDisplay.Token(activePlan?.Strategy)} " +
+                 $"цель={RussianDisplay.Token(activePlan?.GoalId)} " +
+                 $"осталось тиков={activePlan?.RemainingTicks}");
         if (_plan.Interrupted)
-            _log("PLAN INTERRUPTED");
+            _log("ПЛАН ПРЕРВАН");
 
         goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
         var semanticKey = $"{_affect.Mood}+drive={dominantDrive}+phase={circ.Phase}+focus={attention.Focus1}";
@@ -565,7 +574,7 @@ public sealed class LifeLoop
         var reason = decision.PolicySource == "heuristic" ? chosen.Reason : $"{chosen.Reason}|{decision.PolicySource}";
         reason = NormalizeDecisionReason(reason, maskFallback);
         if (decision.IllegalChoice)
-            _log("ML_INVALID_ACTION_FALLBACK");
+            _log("ML выбрал недопустимое действие; применён резервный выбор");
 
         var invalidAction = decision.IllegalChoice || !IsMaskAllowed(actionMask, action.Name);
         EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason, mask = maskStatus }, ct);
@@ -594,7 +603,8 @@ public sealed class LifeLoop
         if (_loop.IsLoopDetected && _loop.ShouldAnnounceLoop(_tick))
         {
             EmitTrace("loop.detected", new { type = _loop.LoopType, streak = _loop.Streak, strength = _loop.LoopStrength, avgR = _loop.AvgRewardShort }, ct);
-            _log($"LOOP_DETECTED type={_loop.LoopType} tick={_tick} strength={_loop.LoopStrength:0.00}");
+            _log($"ОБНАРУЖЕНА ПЕТЛЯ тип={RussianDisplay.Token(_loop.LoopType)} " +
+                 $"тик={_tick} сила={_loop.LoopStrength:0.00}");
         }
 
         var isPanic = _episode.IsPanic(_homeo.Safety, _homeo.Pain, _world.Threat);
@@ -663,7 +673,7 @@ public sealed class LifeLoop
             var msg = FormatOutputMessage(outcome.Message!.Trim(), action.Name, voiceMode);
             if (_dedupe.ShouldPublish(_tick, msg))
             {
-                _log($"[life] OUTPUT: {msg}");
+                _log($"[жизнь] ВЫВОД: {msg}");
                 EmitTrace("output", new { message = msg, actionName = action.Name }, ct);
                 _outputSinceDiag = msg;
                 _output(new LifeOutputDto(_tick, DateTimeOffset.Now, msg, action.Name), ct);
@@ -674,24 +684,26 @@ public sealed class LifeLoop
         {
             var count = _world.Events.Consume(e => e.Type == "social_ping" && e.Salience > 0.3);
             if (count > 0)
-                _log($"EVENT_CONSUMED social_ping tick={_tick}");
+                _log($"ОБРАБОТАНО СОБЫТИЕ сигнал контакта, тик={_tick}");
         }
         else if (action.Name == "explore_signal")
         {
             var count = _world.Events.Consume(e => (e.Type == "calm_window" || e.Type == "novelty_opportunity") && e.Salience > 0.3);
             if (count > 0)
-                _log($"EVENT_CONSUMED explore_window tick={_tick}");
+                _log($"ОБРАБОТАНО СОБЫТИЕ окно исследования, тик={_tick}");
         }
         else if (action.Name == "breathe_slow" && attention.Focus1 == "threat")
         {
             var count = _world.Events.Consume(e => e.Type == "threat_spike" && e.Salience > 0.3);
             if (count > 0)
-                _log($"EVENT_CONSUMED threat_spike tick={_tick}");
+                _log($"ОБРАБОТАНО СОБЫТИЕ всплеск угрозы, тик={_tick}");
         }
 
         var policy = new DeepBrain.Shared.BrainDtos.V2.PolicyContextDto(
             strategy,
-            $"drive={dominantDrive} loopPenalty={_loop.LoopPenalty:0.00} -> {strategy}:{action.Name}",
+            $"мотив={RussianDisplay.Token(dominantDrive)} " +
+            $"штраф петли={_loop.LoopPenalty:0.00} → " +
+            $"{RussianDisplay.Token(strategy)}:{RussianDisplay.Token(action.Name)}",
             _loop.LoopCount,
             _loop.LoopPenalty,
             _loop.LastAction,
@@ -777,7 +789,10 @@ public sealed class LifeLoop
             new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
             loopInfo
         );
-        EmitTrace("tick", $"tick={_tick} ep={_episode.EpisodeId} act={action.Name} reward={rewardDto.Total:0.000} loop={_loop.LoopType} eps={decision.Epsilon:0.000}", ct);
+        EmitTrace("tick",
+            $"тик={_tick} эпизод={_episode.EpisodeId} " +
+            $"действие={RussianDisplay.Token(action.Name)} награда={rewardDto.Total:0.000} " +
+            $"петля={RussianDisplay.Token(_loop.LoopType)} ε={decision.Epsilon:0.000}", ct);
 
         var episode = new EpisodeDto(
             _tick,
@@ -810,31 +825,47 @@ public sealed class LifeLoop
                 _trainingEpisodeCount++;
             var gateReward = _policyEvaluator.Snapshot(mlMode == "evaluation").AvgReward;
             if (_curriculum.Advance(gateReward))
-                _log($"SCENARIO_NEXT name={_curriculum.ScenarioName} idx={_curriculum.ScenarioIndex} mode={_curriculum.Mode}");
+                _log($"СЛЕДУЮЩИЙ СЦЕНАРИЙ название={RussianDisplay.Token(_curriculum.ScenarioName)} " +
+                     $"индекс={_curriculum.ScenarioIndex} режим={RussianDisplay.Token(_curriculum.Mode)}");
             ResetEpisode(resetReason);
-            _log($"EPISODE_RESET reason={resetReason} id={_episode.EpisodeId}");
-            EmitTrace("episode.reset", $"episode={_episode.EpisodeId} reason={resetReason}", ct);
+            _log($"СБРОС ЭПИЗОДА причина={RussianDisplay.Token(resetReason)} id={_episode.EpisodeId}");
+            EmitTrace("episode.reset",
+                $"эпизод={_episode.EpisodeId} причина={RussianDisplay.Token(resetReason)}", ct);
         }
 
         foreach (var change in _habits.ApplyDecay(_tick))
-            _log($"HABIT_DECAY: {change.before.Id} {change.before.Strength:0.00}->{change.after.Strength:0.00}");
+            _log($"ОСЛАБЛЕНИЕ ПРИВЫЧКИ: {RussianDisplay.Token(change.before.Id)} " +
+                 $"{change.before.Strength:0.00} → {change.after.Strength:0.00}");
 
         if (_tick < DiagnosticTicks && _tick % 50 == 0)
         {
             var goalsLine = string.Join(",", goals.Select(g => $"{g.Id}:{g.Urgency:0.00}"));
-            var planLine = activePlan is null ? "none" : $"{activePlan.Strategy}/{activePlan.GoalId}/{activePlan.RemainingTicks}";
+            var planLine = activePlan is null
+                ? "нет"
+                : $"{RussianDisplay.Token(activePlan.Strategy)}/{RussianDisplay.Token(activePlan.GoalId)}/{activePlan.RemainingTicks}";
             var topEvent = recentEvents.FirstOrDefault();
-            var topEventText = topEvent is null ? "none" : $"{topEvent.Type}/{topEvent.Salience:0.00}";
-            var habitLine = habitAction is null ? "none" : $"{habitAction}/{habitStrength:0.00}";
-            var line = $"tick={_tick} | phase={circ.Phase} | focus={attention.Focus1}({attention.Intensity:0.00}) | voice={voiceMode} | cue={cueKey} | habit={habitLine} | plan={planLine} | action={action.Name}({action.Kind}) | reward={rewardDto.Total:0.000} | loopPenalty={_loop.LoopPenalty:0.00} | selftalk={(string.IsNullOrWhiteSpace(_lastSelfTalk) ? "no" : "yes")}";
+            var topEventText = topEvent is null
+                ? "нет"
+                : $"{RussianDisplay.Token(topEvent.Type)}/{topEvent.Salience:0.00}";
+            var habitLine = habitAction is null
+                ? "нет"
+                : $"{RussianDisplay.Token(habitAction)}/{habitStrength:0.00}";
+            var line = $"тик={_tick} | фаза={RussianDisplay.Token(circ.Phase)} | " +
+                       $"фокус={RussianDisplay.Token(attention.Focus1)}({attention.Intensity:0.00}) | " +
+                       $"голос={RussianDisplay.Token(voiceMode)} | сигнал={RussianDisplay.Token(cueKey)} | " +
+                       $"привычка={habitLine} | план={planLine} | " +
+                       $"действие={RussianDisplay.Token(action.Name)}({RussianDisplay.Token(action.Kind)}) | " +
+                       $"награда={rewardDto.Total:0.000} | штраф петли={_loop.LoopPenalty:0.00} | " +
+                       $"внутренняя речь={RussianDisplay.YesNo(!string.IsNullOrWhiteSpace(_lastSelfTalk))}";
             _log(line);
             if (!string.IsNullOrWhiteSpace(_outputSinceDiag))
             {
-                _log($"OUTPUT: {_outputSinceDiag}");
+                _log($"ВЫВОД: {_outputSinceDiag}");
                 _outputSinceDiag = null;
             }
             if (_loop.SameActionStreak > 10)
-                _log($"LOOP WARNING: strategy={strategy} action={action.Name}");
+                _log($"ПРЕДУПРЕЖДЕНИЕ О ПЕТЛЕ: стратегия={RussianDisplay.Token(strategy)} " +
+                     $"действие={RussianDisplay.Token(action.Name)}");
         }
 
         if (_loop.IsInLoop && _loop.LoopStrength >= config.SelfTalkLoopMinStrength)
@@ -883,7 +914,7 @@ public sealed class LifeLoop
         _lastSelfTalk = selfTalk;
         if (!string.IsNullOrWhiteSpace(selfTalk) && _selfTalkThrottle.ShouldSpeak(_tick, selfTalk, semanticEvent))
         {
-            _log($"SELF TALK: {selfTalk}");
+            _log($"ВНУТРЕННЯЯ РЕЧЬ: {selfTalk}");
             EmitTrace("selftalk", new { text = selfTalk }, ct);
             _output(new LifeOutputDto(_tick, DateTimeOffset.Now, selfTalk, "selftalk"), ct);
             _episodeSelfTalkCount++;
@@ -897,7 +928,9 @@ public sealed class LifeLoop
 
         var habitUpdated = _habits.UpdateAfter(action.Name, rewardDto.Total, cueKey, _tick);
         if (habitUpdated is not null)
-            _log($"HABIT_LEARN: {cueKey} -> {habitUpdated.Id} strength={habitUpdated.Strength:0.00} avgReward={habitUpdated.AvgReward:0.000}");
+            _log($"ОБУЧЕНИЕ ПРИВЫЧКИ: {RussianDisplay.Token(cueKey)} → " +
+                 $"{RussianDisplay.Token(habitUpdated.Id)} сила={habitUpdated.Strength:0.00} " +
+                 $"средняя награда={habitUpdated.AvgReward:0.000}");
 
         if (_tick > 0 && _tick % 200 == 0)
             EmitStats();
@@ -1220,7 +1253,12 @@ public sealed class LifeLoop
 
     private static string FormatRewardTraceLine(RewardDto reward)
     {
-        return $"reward: tot={FormatSigned(reward.Total)} h={FormatSigned(reward.Homeostasis)} x={FormatSigned(reward.Explore)} s={FormatSigned(reward.Social)} lp={FormatSigned(reward.LoopPenalty)} ia={FormatSigned(reward.InvalidActionPenalty)}";
+        return $"награда: всего={FormatSigned(reward.Total)} " +
+               $"гомео={FormatSigned(reward.Homeostasis)} " +
+               $"исслед={FormatSigned(reward.Explore)} " +
+               $"соц={FormatSigned(reward.Social)} " +
+               $"петля={FormatSigned(reward.LoopPenalty)} " +
+               $"недоп={FormatSigned(reward.InvalidActionPenalty)}";
     }
 
     private static string NormalizeDecisionReason(string reason, bool maskFallback)
@@ -1294,7 +1332,7 @@ public sealed class LifeLoop
         var topActions = _actionCounts
             .OrderByDescending(kv => kv.Value)
             .Take(5)
-            .Select(kv => $"{kv.Key}:{kv.Value}")
+            .Select(kv => $"{RussianDisplay.Token(kv.Key)}:{kv.Value}")
             .ToArray();
 
         var threatCount = _eventCounts.TryGetValue("threat_spike", out var t) ? t : 0;
@@ -1303,13 +1341,25 @@ public sealed class LifeLoop
         var novCount = _eventCounts.TryGetValue("novelty_opportunity", out var n) ? n : 0;
         var socialCount = _eventCounts.TryGetValue("social_ping", out var s) ? s : 0;
 
-        _log($"STATS(200): anxious={anxiousPct:0.00} calm={calmPct:0.00} curious={curiousPct:0.00} neutral={neutralPct:0.00} tender={tenderPct:0.00} avgPain={avgPain:0.00} p95Pain={p95Pain:0.00} avgSafety={avgSafety:0.00} avgArousal={avgArousal:0.00}");
-        _log($"STATS climate: avgThreat={avgThreat:0.00} avgCalm={avgCalm:0.00} avgStress={avgStress:0.00} avgThreatFocus={avgThreatFocus:0.00} painClamped={_painClampedCount}");
-        _log($"STATS actions: {string.Join(", ", topActions)}");
-        _log($"STATS events: threat_spike={threatCount} micro_threat={microCount} calm_window={calmCount} novelty={novCount} social_ping={socialCount}");
+        _log($"СТАТИСТИКА(200): тревога={anxiousPct:0.00} спокойствие={calmPct:0.00} " +
+             $"любопытство={curiousPct:0.00} нейтральное={neutralPct:0.00} мягкое={tenderPct:0.00} " +
+             $"средняя боль={avgPain:0.00} боль p95={p95Pain:0.00} " +
+             $"средняя безопасность={avgSafety:0.00} среднее возбуждение={avgArousal:0.00}");
+        _log($"СТАТИСТИКА климата: средняя угроза={avgThreat:0.00} " +
+             $"среднее спокойствие={avgCalm:0.00} средний стресс={avgStress:0.00} " +
+             $"фокус на угрозе={avgThreatFocus:0.00} ограничений боли={_painClampedCount}");
+        _log($"СТАТИСТИКА действий: {string.Join(", ", topActions)}");
+        _log($"СТАТИСТИКА событий: всплеск угрозы={threatCount} малая угроза={microCount} " +
+             $"окно спокойствия={calmCount} новизна={novCount} сигнал контакта={socialCount}");
         if (_mlTelemetry is not null)
         {
-            _log($"STATS_ML(200): avgR={_mlTelemetry.AvgReward200:0.000} avgQ={_mlTelemetry.AvgQ:0.000} entropy={_mlTelemetry.Entropy:0.000} eps={_mlTelemetry.Epsilon:0.000} w={_mlTelemetry.NetWeight:0.00} loss={_mlTelemetry.LastLoss:0.000} buf={_mlTelemetry.BufferSize} nan={_mlTelemetry.NanSkips} inv={_mlTelemetry.InvalidActionFallbackCount} source={_mlTelemetry.PolicySource}");
+            _log($"СТАТИСТИКА_ML(200): средняя награда={_mlTelemetry.AvgReward200:0.000} " +
+                 $"среднее Q={_mlTelemetry.AvgQ:0.000} энтропия={_mlTelemetry.Entropy:0.000} " +
+                 $"ε={_mlTelemetry.Epsilon:0.000} вес сети={_mlTelemetry.NetWeight:0.00} " +
+                 $"ошибка={_mlTelemetry.LastLoss:0.000} буфер={_mlTelemetry.BufferSize} " +
+                 $"пропуски NaN={_mlTelemetry.NanSkips} " +
+                 $"недопустимые={_mlTelemetry.InvalidActionFallbackCount} " +
+                 $"источник={RussianDisplay.Token(_mlTelemetry.PolicySource)}");
         }
 
         _anxiousCount = 0;
@@ -1375,4 +1425,3 @@ public sealed class LifeLoop
         }
     }
 }
-

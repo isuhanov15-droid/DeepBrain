@@ -37,13 +37,13 @@ public sealed class TcpClientService : IAsyncDisposable
             await _client.ConnectAsync(host, port);
             _stream = _client.GetStream();
 
-            OnInfo?.Invoke($"Connected to {host}:{port}");
+            OnInfo?.Invoke($"Подключено к {host}:{port}");
 
             _ = Task.Run(() => ReadLoopAsync(_cts.Token));
         }
         catch (Exception ex)
         {
-            OnInfo?.Invoke($"Connect error: {ex.Message}");
+            OnInfo?.Invoke($"Ошибка подключения: {ex.Message}");
             await DisconnectAsync();
         }
     }
@@ -85,7 +85,7 @@ public sealed class TcpClientService : IAsyncDisposable
                 var frame = await Framing.ReadFrameAsync(_stream, Framing.MaxFrameBytes, ct);
                 if (frame is null)
                 {
-                    OnInfo?.Invoke("ReadLoop: disconnected");
+                    OnInfo?.Invoke("Соединение закрыто удалённой стороной");
                     break;
                 }
 
@@ -97,7 +97,7 @@ public sealed class TcpClientService : IAsyncDisposable
                 catch (JsonException jex)
                 {
                     var head = HexHead(frame, 16);
-                    OnInfo?.Invoke($"Invalid frame payload (first bytes {head}): {jex.Message}");
+                    OnInfo?.Invoke($"Некорректные данные кадра (первые байты {head}): {jex.Message}");
                     break;
                 }
 
@@ -107,15 +107,15 @@ public sealed class TcpClientService : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (InvalidDataException ex)
         {
-            OnInfo?.Invoke($"ReadLoop invalid frame: {ex.Message}");
+            OnInfo?.Invoke($"Некорректный входящий кадр: {ex.Message}");
         }
         catch (Exception ex)
         {
-            OnInfo?.Invoke($"ReadLoop error: {ex}");
+            OnInfo?.Invoke($"Ошибка чтения соединения: {ex}");
         }
         finally
         {
-            OnInfo?.Invoke("Disconnected.");
+            OnInfo?.Invoke("Отключено");
             if (_client is not null)
                 await DisconnectAsync();
         }
@@ -133,11 +133,11 @@ public sealed class TcpClientService : IAsyncDisposable
                     if (env.Payload is JsonElement je && je.TryGetProperty("text", out var t))
                         OnLog?.Invoke(t.GetString() ?? "");
                     else
-                        OnLog?.Invoke(env.Payload?.ToString() ?? "(log)");
+                        OnLog?.Invoke(env.Payload?.ToString() ?? "(запись журнала)");
                     break;
 
             case Msg.Pong:
-                OnInfo?.Invoke("pong ✅");
+                OnInfo?.Invoke("Ответ получен ✅");
                 _pongTcs?.TrySetResult(true);
                 break;
 
@@ -157,7 +157,7 @@ public sealed class TcpClientService : IAsyncDisposable
                 break;
 
             case Msg.BrainLifeOutputAppend:
-                // no noisy info log for life outputs
+                // Жизненный вывод не дублируется шумным информационным сообщением.
                 OnLifeOutput?.Invoke(PayloadReader.Read<LifeOutputDto>(env.Payload));
                 break;
 
@@ -169,13 +169,13 @@ public sealed class TcpClientService : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            OnInfo?.Invoke($"HandleIncoming error: {ex.Message}");
+            OnInfo?.Invoke($"Ошибка обработки входящего сообщения: {ex.Message}");
         }
     }
 
     private static string HexHead(byte[] data, int count)
     {
-        if (data.Length == 0) return "empty";
+        if (data.Length == 0) return "пусто";
         var take = Math.Min(count, data.Length);
         var chars = new char[take * 2];
         for (var i = 0; i < take; i++)
@@ -200,7 +200,7 @@ public sealed class TcpClientService : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            OnInfo?.Invoke($"Send error: {ex.Message}");
+            OnInfo?.Invoke($"Ошибка отправки: {ex.Message}");
             await DisconnectAsync();
         }
         finally

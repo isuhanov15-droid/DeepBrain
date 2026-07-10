@@ -61,7 +61,7 @@ public sealed class ClientSession : IAsyncDisposable
 
     public async Task RunAsync(Func<string, Task> onInfo, CancellationToken ct)
     {
-        await onInfo($"+ client {Remote}");
+        await onInfo($"+ клиент {Remote}");
         _sendLoop = Task.Run(() => SendLoopAsync(onInfo, ct), ct);
 
         while (!ct.IsCancellationRequested)
@@ -73,7 +73,7 @@ public sealed class ClientSession : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                await onInfo($"ReadEnvelope error from {Remote}: {ex.Message}");
+                await onInfo($"Ошибка чтения сообщения от {Remote}: {ex.Message}");
                 break;
             }
 
@@ -85,7 +85,7 @@ public sealed class ClientSession : IAsyncDisposable
         _sendQueue.Writer.TryComplete();
         if (_sendLoop is not null)
             await _sendLoop;
-        await onInfo($"- client {Remote}");
+        await onInfo($"- клиент {Remote}");
     }
 
     private async Task HandleAsync(Envelope env, Func<string, Task> onInfo, CancellationToken ct)
@@ -98,27 +98,27 @@ public sealed class ClientSession : IAsyncDisposable
 
             case Msg.LogsSubscribe:
                 _wantsLogs = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] logs subscribed ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Подписка на журнал оформлена ✅", ct);
                 break;
 
             case Msg.BrainStateSubscribe:
                 _wantsState = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] state subscribed ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Подписка на состояние оформлена ✅", ct);
                 break;
 
             case Msg.TraceSubscribe:
                 _wantsTrace = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] trace subscribed ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Подписка на трассировку оформлена ✅", ct);
                 break;
 
             case Msg.BrainLifeStateSubscribe:
                 _wantsLifeState = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] life state subscribed ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Подписка на жизненное состояние оформлена ✅", ct);
                 break;
 
             case Msg.BrainLifeOutputSubscribe:
                 _wantsLifeOutput = true;
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] life output subscribed ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Подписка на жизненный вывод оформлена ✅", ct);
                 foreach (var output in _getLifeOutputs())
                 {
                     await SendLifeOutputAsync(output, ct);
@@ -127,39 +127,39 @@ public sealed class ClientSession : IAsyncDisposable
 
             case Msg.BrainStart:
                 await _onBrainStart();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.start ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Мозг запущен (brain.start) ✅", ct);
                 break;
 
             case Msg.BrainStop:
                 await _onBrainStop();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.stop ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Мозг остановлен (brain.stop) ✅", ct);
                 break;
 
             case Msg.BrainStep:
                 await _onBrainStep();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.step ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Выполнен шаг мозга (brain.step) ✅", ct);
                 break;
 
             case Msg.BrainLifeStart:
                 await _onLifeStart();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.life.start ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Жизненный цикл запущен (brain.life.start) ✅", ct);
                 break;
 
             case Msg.BrainLifeStop:
                 await _onLifeStop();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.life.stop ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Жизненный цикл остановлен (brain.life.stop) ✅", ct);
                 break;
 
             case Msg.BrainLifeStep:
                 await _onLifeStep();
-                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] brain.life.step ✅", ct);
+                await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Выполнен шаг жизненного цикла (brain.life.step) ✅", ct);
                 break;
 
             case Msg.InputSet:
                 {
                     var input = PayloadReader.Read<BrainInputDto>(env.Payload);
                     await _onInputSet(input);
-                    await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] input.set ✅", ct);
+                    await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Входные данные установлены (input.set) ✅", ct);
                     break;
                 }
 
@@ -167,12 +167,12 @@ public sealed class ClientSession : IAsyncDisposable
                 {
                     var ev = PayloadReader.Read<BrainEventDto>(env.Payload);
                     await _onEventPush(ev.Name);
-                    await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] event.push '{ev.Name}' ✅", ct);
+                    await SendLogAsync($"[{DateTime.Now:HH:mm:ss}] Событие добавлено (event.push): '{ev.Name}' ✅", ct);
                     break;
                 }
 
             default:
-                await onInfo($"Unknown msg from {Remote}: {env.Type}");
+                await onInfo($"Неизвестное сообщение от {Remote}: {env.Type}");
                 break;
         }
     }
@@ -230,7 +230,7 @@ public sealed class ClientSession : IAsyncDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            try { await onInfo($"SendLoop error to {Remote}: {ex.Message}"); } catch { }
+            try { await onInfo($"Ошибка отправки данных клиенту {Remote}: {ex.Message}"); } catch { }
         }
     }
 

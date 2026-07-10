@@ -11,10 +11,10 @@ v0.8.5 добавляет новое поведенческое ядро: loop d
 v0.9 добавляет curriculum сценариев, training/evaluation режимы, отчёты по эпизодам и агрегированную оценку политики с заморозкой базовой телеметрии.
 v1.0 фиксирует ядро: стабильные DTO и JSON property names, компактный tick trace, неблокирующую запись `episodes.jsonl`, единый `brainconfig.json`, `docs/regression_checklist.md` и `docs/deepbrain_architecture.md`.
 
-### Manual check (v0.9)
+### Ручная проверка (v0.9)
 1) Запустить Host + Studio и наблюдать 10–15 минут: trace/state/output обновляются.
-2) Переключать сценарии через Host commands: `scenario.list`, `scenario.set <name>`, `curriculum.mode`.
-3) Убедиться, что в Life‑панели меняются `scenario` и `curriculum`.
+2) Переключать сценарии командами Host: `scenario.list`, `scenario.set <name>`, `curriculum.mode`.
+3) Убедиться, что на панели «Жизнь» меняются сценарий и режим учебной программы.
 4) Индуцировать loop (например, временно ограничить действия маской) и увидеть рост loopStrength и `episode` reset с reason=loop.
 5) Убедиться, что после reset эпизода система продолжает работать и начинает новый эпизод, а в `reports/episodes/YYYY-MM-DD/` появляются отчёты.
 
@@ -670,7 +670,6 @@ Connect: ping + подписки logs/state/trace/life/output.
 - Проект содержит два параллельных мозга: v0.1 (старый) и v0.4…v0.8 (LifeLoop).
 - LifeLoop по умолчанию активен и вещает расширенную телеметрию (включая ML‑метрики v0.8).
 - Studio — только наблюдение и вывод состояния, без управления мозгом.
-
 
 
 

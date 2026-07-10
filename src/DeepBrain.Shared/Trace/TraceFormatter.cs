@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DeepBrain.Shared.Localization;
 using DeepBrain.Shared.Net;
 
 namespace DeepBrain.Shared.Trace;
@@ -11,7 +12,7 @@ public static class TraceFormatter
             return line;
 
         if (!TryGetElement(trace.Data, out var data))
-            return $"trace[{trace.Stage}]";
+            return $"трассировка[{trace.Stage}]";
 
         return trace.Stage switch
         {
@@ -20,38 +21,86 @@ public static class TraceFormatter
             "tick" => GetString(data, "line") ?? CompactJson(trace.Stage, data),
             "episode.reset" => GetString(data, "line") ?? CompactJson(trace.Stage, data),
             "scenario" => GetString(data, "line") ?? CompactJson(trace.Stage, data),
-            "selftalk" => $"selftalk: {GetString(data, "text") ?? "n/a"}",
-            "output" => $"output action={GetString(data, "actionName") ?? "n/a"} msg={GetString(data, "message") ?? ""}".Trim(),
-            "loop.detected" => $"loop type={GetString(data, "type") ?? "none"} streak={GetInt64(data, "streak")} strength={GetDouble(data, "strength"):0.00}",
+            "world.climate" => FormatClimate(data),
+            "homeostasis" => FormatHomeostasis(data),
+            "instincts" => FormatInstincts(data),
+            "affect" => FormatAffect(data),
+            "action" => FormatAction(data),
+            "ml.train" => $"обучение ML шаг={GetInt64(data, "step")} ошибка={GetDouble(data, "loss"):0.000}",
+            "selftalk" => $"внутренняя речь: {GetString(data, "text") ?? RussianDisplay.NotAvailable}",
+            "output" => $"вывод действие={RussianDisplay.Token(GetString(data, "actionName"))} " +
+                        $"сообщение={GetString(data, "message") ?? string.Empty}".Trim(),
+            "loop.detected" => $"петля тип={RussianDisplay.Token(GetString(data, "type"))} " +
+                               $"серия={GetInt64(data, "streak")} сила={GetDouble(data, "strength"):0.00}",
             _ => CompactJson(trace.Stage, data)
         };
     }
 
     private static string FormatDecision(JsonElement data)
     {
-        var action = GetString(data, "actionName") ?? "n/a";
-        var kind = GetString(data, "kind") ?? "n/a";
-        var reason = GetString(data, "reason") ?? "n/a";
-        var mask = GetString(data, "mask") ?? "ok";
-        return $"decision act={action} kind={kind} reason={reason} mask={mask}";
+        var action = RussianDisplay.Token(GetString(data, "actionName"));
+        var kind = RussianDisplay.Token(GetString(data, "kind"));
+        var reason = RussianDisplay.Token(GetString(data, "reason"));
+        var mask = RussianDisplay.Token(GetString(data, "mask") ?? "ok");
+        return $"решение действие={action} тип={kind} причина={reason} маска={mask}";
     }
 
     private static string FormatReward(JsonElement data)
     {
         if (data.ValueKind == JsonValueKind.String)
-            return data.GetString() ?? "reward";
+            return data.GetString() ?? "награда";
 
         var line = GetString(data, "line");
         if (!string.IsNullOrWhiteSpace(line))
             return line!;
 
-        return CompactJson("reward", data);
+        return CompactJson("награда", data);
+    }
+
+    private static string FormatClimate(JsonElement data)
+    {
+        return $"климат спокойствие={GetDouble(data, "calm"):0.00} " +
+               $"стресс={GetDouble(data, "stress"):0.00} " +
+               $"напряжение={GetDouble(data, "tension"):0.00} " +
+               $"база={GetDouble(data, "baseline"):0.00} " +
+               $"последнее событие={RussianDisplay.Token(GetString(data, "lastMajor"))}";
+    }
+
+    private static string FormatHomeostasis(JsonElement data)
+    {
+        return $"гомеостаз энергия={GetDouble(data, "energy"):0.00} " +
+               $"усталость={GetDouble(data, "fatigue"):0.00} " +
+               $"возбуждение={GetDouble(data, "arousal"):0.00} " +
+               $"боль={GetDouble(data, "pain"):0.00} " +
+               $"безопасность={GetDouble(data, "safety"):0.00}";
+    }
+
+    private static string FormatInstincts(JsonElement data)
+    {
+        return $"инстинкты самосохранение={GetDouble(data, "selfPreservation"):0.00} " +
+               $"энергосбережение={GetDouble(data, "energyConservation"):0.00} " +
+               $"исследование={GetDouble(data, "exploration"):0.00} " +
+               $"привязанность={GetDouble(data, "attachment"):0.00} " +
+               $"самостоятельность={GetDouble(data, "agency"):0.00}";
+    }
+
+    private static string FormatAffect(JsonElement data)
+    {
+        return $"аффект настроение={RussianDisplay.Token(GetString(data, "mood"))} " +
+               $"валентность={GetDouble(data, "valence"):0.00} " +
+               $"возбуждение={GetDouble(data, "arousal"):0.00}";
+    }
+
+    private static string FormatAction(JsonElement data)
+    {
+        return $"действие={RussianDisplay.Token(GetString(data, "actionName"))} " +
+               $"тип={RussianDisplay.Token(GetString(data, "kind"))}";
     }
 
     private static string CompactJson(string stage, JsonElement data)
     {
         var json = data.GetRawText();
-        return $"trace[{stage}]: {json}";
+        return $"трассировка[{stage}]: {json}";
     }
 
     private static bool TryGetElement(object? value, out JsonElement element)

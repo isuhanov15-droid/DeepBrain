@@ -1,36 +1,42 @@
-# Telemetry Reference
+# Справочник по телеметрии
 
-## Life UI
-The Life panel shows the stable operator-facing telemetry.
+## Панель «Жизнь»
 
-### Evaluation ratios
+Панель «Жизнь» показывает стабильную телеметрию, предназначенную для оператора.
+
+### Коэффициенты оценки
+
 - `calmRatio`
 - `anxiousRatio`
 - `curiousRatio`
 
-These are always clamped to `0..1` and are the only calm/anxious/curious values shown in the main `eval:` line:
+Значения всегда ограничены диапазоном `0..1`. Только они используются для спокойствия, тревоги и любопытства в основной строке оценки:
 
 ```text
-eval: reward=0.013 loops=1 diversity=0.42 calm=0.81 anxious=0.04 curious=0.15
+оценка: награда=0.013 петли=1 разнообразие=0.42 спокойствие=0.81 тревога=0.04 любопытство=0.15
 ```
 
-### Evaluation counts
+### Счётчики оценки
+
 - `calmCount`
 - `anxiousCount`
 - `curiousCount`
 - `loopCount`
 
-These stay in DTO/report payloads and are not shown in the main eval line.
+Они остаются в DTO и отчётах, но не выводятся в основной строке оценки.
 
-### Rolling stats scores
+### Оценки скользящей статистики
+
 - `calmScore`
 - `anxiousScore`
 - `curiousScore`
 
-These belong to the short rolling `stats` snapshot and are separate from evaluation ratios. They are displayed as `anxScore/calmScore/curiousScore` to avoid ambiguity.
+Они относятся к краткому скользящему снимку `stats` и не совпадают с коэффициентами оценки. В русском интерфейсе отображаются как «тревога/спокойствие/любопытство» внутри строки статистики.
 
-## Reward
-Stable reward breakdown fields:
+## Награда
+
+Стабильные поля разложения награды:
+
 - `homeostasis`
 - `explore`
 - `social`
@@ -38,29 +44,35 @@ Stable reward breakdown fields:
 - `invalidActionPenalty`
 - `total`
 
-## Loop
-Stable loop telemetry:
+## Петля
+
+Стабильная телеметрия петли:
+
 - `isInLoop`
 - `type`
 - `strength`
 - `observedCount`
 - `currentPenalty`
 
-## Console / Trace
-Human-readable console trace lines use compact formatting:
-- `tick=...`
-- `decision act=...`
-- `reward tot=...`
-- `episode=...`
-- `scenario=...`
+## Консоль и трассировка
 
-Machine-readable JSON trace remains available in persisted trace files.
+Читаемые человеком строки используют компактный русский формат:
 
-## Internal / Report Fields
-The following fields remain available for reports and diagnostics:
-- action histograms
-- mood distributions
-- evaluation counts
-- reward breakdown averages
-- scenario score
-- ML telemetry
+- `тик=...`;
+- `решение действие=...`;
+- `награда всего=...`;
+- `эпизод=...`;
+- `сценарий=...`.
+
+Машиночитаемая JSON-трассировка сохраняет стабильные английские имена полей в файлах трассировки.
+
+## Внутренние поля и отчёты
+
+Для отчётов и диагностики остаются доступны:
+
+- гистограммы действий;
+- распределения настроений;
+- счётчики оценки;
+- средние составляющие награды;
+- оценка сценария;
+- телеметрия ML.

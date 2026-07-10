@@ -10,7 +10,7 @@ public sealed class BrainStateInternal
     public float Energy { get; set; } = BaselineEnergy;
     public float Focus  { get; set; } = BaselineFocus;
 
-    public string Mood { get; set; } = "calm"; // calm/anxious/tired/focused...
+    public string Mood { get; set; } = "calm"; // Стабильный код: calm/anxious/tired/focused.
 
     public BrainStateInternal Clone() => new()
     {

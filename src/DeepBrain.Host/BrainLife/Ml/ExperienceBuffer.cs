@@ -11,7 +11,7 @@ public sealed class ExperienceBuffer
 
     public ExperienceBuffer(int capacity)
     {
-        if (capacity <= 0) throw new ArgumentException("capacity must be > 0", nameof(capacity));
+        if (capacity <= 0) throw new ArgumentException("Ёмкость должна быть больше нуля", nameof(capacity));
         _buffer = new Transition[capacity];
     }
 

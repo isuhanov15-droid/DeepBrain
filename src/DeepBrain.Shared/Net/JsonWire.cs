@@ -15,5 +15,5 @@ public static class JsonWire
 
     public static Envelope Deserialize(byte[] bytes) =>
         JsonSerializer.Deserialize<Envelope>(bytes, Options)
-        ?? throw new InvalidDataException("Failed to deserialize Envelope.");
+        ?? throw new InvalidDataException("Не удалось десериализовать сетевой конверт Envelope.");
 }

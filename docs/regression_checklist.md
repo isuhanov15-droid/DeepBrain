@@ -1,33 +1,39 @@
-# DeepBrain v1.0 Regression Checklist
+# Регрессионная проверка DeepBrain v1.0
 
-## Build and Test
-- Run `dotnet build DeepBrain.slnx`.
-- Run `dotnet test tests/DeepBrain.Tests/DeepBrain.Tests.csproj`.
+## Сборка и тесты
 
-## Host and Studio
-- Start `DeepBrain.Host`.
-- Start `DeepBrain.Studio`.
-- Connect Studio to `127.0.0.1:5555`.
-- Confirm `Life`, `Output`, `Trace`, and `Logs` tabs update without overlap.
+- Выполнить `dotnet build DeepBrain.slnx`.
+- Выполнить `dotnet test tests/DeepBrain.Tests/DeepBrain.Tests.csproj`.
 
-## Scenario and Curriculum
-- Run `scenario.list` in Host and verify scenarios are printed.
-- Run `scenario.set calm_baseline` and confirm `scenario=calm_baseline` in Life telemetry.
-- Run `curriculum.mode round_robin` and `curriculum.next`; confirm scenario index changes.
+## Host и Studio
 
-## ML and Evaluation
-- Run `ml.mode training`, then `mlstatus`; verify mode is `training`.
-- Run `ml.mode evaluation`, then `mlstatus`; verify epsilon is forced to zero and training is disabled.
-- If ML is unavailable, verify `mlstatus` explains why backend is `stub` or disabled.
+- Запустить `DeepBrain.Host`.
+- Запустить `DeepBrain.Studio`.
+- Подключить Studio к `127.0.0.1:5555`.
+- Убедиться, что вкладки «Жизнь», «Вывод», «Трассировка» и «Журнал» обновляются без наложений.
 
-## Episode Flow
-- Let at least one episode finish naturally or run `episode.reset`.
-- Confirm `reports/episodes/YYYY-MM-DD/episodes.jsonl` receives a new JSON line.
-- Confirm Host logs `EPISODE_RESET`.
-- Confirm the next episode starts automatically.
+## Сценарии и учебная программа
 
-## Trace, Logs, Output
-- Confirm compact tick traces continue to arrive: `tick=... ep=... act=... reward=...`.
-- Confirm reward trace always includes `tot/h/x/s/lp/ia`.
-- Confirm `Output` receives self-talk and external output messages.
-- Disconnect and reconnect Studio; confirm state, trace, logs, and output recover cleanly.
+- Выполнить `scenario.list` в Host и проверить вывод списка сценариев.
+- Выполнить `scenario.set calm_baseline` и проверить строку `сценарий=спокойная база` в телеметрии «Жизнь».
+- Выполнить `curriculum.mode round_robin`, затем `curriculum.next`; убедиться, что индекс сценария изменился.
+
+## ML и оценка
+
+- Выполнить `ml.mode training`, затем `mlstatus`; проверить режим «обучение».
+- Выполнить `ml.mode evaluation`, затем `mlstatus`; проверить, что ε принудительно равен нулю, а обучение отключено.
+- Если ML недоступен, убедиться, что `mlstatus` объясняет использование заглушки или причину отключения.
+
+## Жизненный цикл эпизода
+
+- Дождаться естественного завершения эпизода или выполнить `episode.reset`.
+- Убедиться, что в `reports/episodes/YYYY-MM-DD/episodes.jsonl` появилась новая строка JSON.
+- Проверить сообщение Host «СБРОС ЭПИЗОДА».
+- Убедиться, что следующий эпизод начался автоматически.
+
+## Трассировка, журнал и вывод
+
+- Убедиться, что продолжают поступать компактные строки: `тик=... эпизод=... действие=... награда=...`.
+- Проверить, что трассировка награды содержит составляющие «всего/гомео/исслед/соц/петля/недоп».
+- Проверить получение внутренней речи и внешних сообщений на вкладке «Вывод».
+- Отключить и снова подключить Studio; проверить восстановление состояния, трассировки, журнала и вывода.

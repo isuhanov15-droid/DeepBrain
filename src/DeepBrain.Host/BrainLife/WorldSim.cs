@@ -54,7 +54,7 @@ public sealed class WorldSim
         if (canThreat && _rng.NextDouble() < threatChance)
         {
             var sev = 0.4 + _rng.NextDouble() * 0.4;
-            var ev = MakeEvent(tick, "threat_spike", sev, "sudden danger");
+            var ev = MakeEvent(tick, "threat_spike", sev, "внезапная опасность");
             newEvents.Add(ev);
             _lastThreatTick = tick;
             _lastMajorEvent = ev.Type;
@@ -64,20 +64,20 @@ public sealed class WorldSim
             Novelty = LifeMath.Clamp01(Novelty + 0.1);
 
         if (_rng.NextDouble() < (MicroThreatChanceBase + StressLevel * 0.05))
-            newEvents.Add(MakeEvent(tick, "micro_threat", 0.25 + _rng.NextDouble() * 0.15, "minor risk"));
+            newEvents.Add(MakeEvent(tick, "micro_threat", 0.25 + _rng.NextDouble() * 0.15, "небольшой риск"));
 
         var noveltyChance = NoveltyChanceBase + Math.Max(0, CalmLevel - 0.6) * 0.06;
         if (_rng.NextDouble() < noveltyChance)
-            newEvents.Add(MakeEvent(tick, "novelty_opportunity", 0.4 + _rng.NextDouble() * 0.2, "new pattern"));
+            newEvents.Add(MakeEvent(tick, "novelty_opportunity", 0.4 + _rng.NextDouble() * 0.2, "новый образец"));
 
         if ((phase == "evening" || phase == "night") && attachmentLevel > 0.2 && _rng.NextDouble() < SocialPingChanceBase)
-            newEvents.Add(MakeEvent(tick, "social_ping", 0.4 + _rng.NextDouble() * 0.2, "call from distance"));
+            newEvents.Add(MakeEvent(tick, "social_ping", 0.4 + _rng.NextDouble() * 0.2, "далёкий зов"));
 
         if (phase == "active" && sleepPressure > 0.5 && _rng.NextDouble() < (FatigueWaveChanceBase + StressLevel * 0.03))
-            newEvents.Add(MakeEvent(tick, "fatigue_wave", 0.45 + _rng.NextDouble() * 0.2, "energy dip"));
+            newEvents.Add(MakeEvent(tick, "fatigue_wave", 0.45 + _rng.NextDouble() * 0.2, "спад энергии"));
 
         if (CalmLevel > 0.6 && _rng.NextDouble() < (CalmWindowChanceBase + CalmLevel * 0.03))
-            newEvents.Add(MakeEvent(tick, "calm_window", 0.3 + _rng.NextDouble() * 0.2, "safe window"));
+            newEvents.Add(MakeEvent(tick, "calm_window", 0.3 + _rng.NextDouble() * 0.2, "безопасное окно"));
 
         foreach (var ev in newEvents)
         {

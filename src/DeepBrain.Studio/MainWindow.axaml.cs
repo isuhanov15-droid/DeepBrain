@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Threading;
 using DeepBrain.Studio.Net;
 using DeepBrain.Shared.Brain;
+using DeepBrain.Shared.Localization;
 
 namespace DeepBrain.Studio;
 
@@ -41,8 +42,8 @@ public partial class MainWindow : Window
             var pong = await _tcp.PingWithTimeoutAsync(1000);
             if (!pong)
             {
-                StatusText.Text = "ping timeout";
-                AddLog("ping timeout");
+                StatusText.Text = "Истекло время ожидания ответа";
+                AddLog("Истекло время ожидания ответа от Host");
                 return;
             }
             await _tcp.SubscribeLogsAsync();
@@ -63,7 +64,9 @@ public partial class MainWindow : Window
         BrainStopBtn.IsEnabled = false;
         _tcp.OnState += (tick, uptime, mode, decision) => Ui(() =>
         {
-            StatusText.Text = $"tick={tick}  uptime={uptime}ms  mode={mode}  decision={decision}";
+            StatusText.Text = $"тик={tick}  работа={uptime} мс  " +
+                              $"режим={RussianDisplay.Token(mode)}  " +
+                              $"решение={RussianDisplay.Token(decision)}";
         });
         BrainStartBtn.Click += async (_, _) => await RunSafeAsync(async () => await _tcp.BrainStartAsync());
         BrainStopBtn.Click += async (_, _) => await RunSafeAsync(async () => await _tcp.BrainStopAsync());
@@ -99,15 +102,14 @@ public partial class MainWindow : Window
     private void AddOutput(LifeOutputDto output)
     {
         while (_outputs.Count >= 50) _outputs.RemoveAt(0);
-        var prefix = output.ActionName == "selftalk"
-            ? "selftalk"
-            : output.ActionName;
+        var prefix = RussianDisplay.Token(output.ActionName);
         _outputs.Add($"[{output.Ts:HH:mm:ss}] {prefix}: {output.Message}");
     }
 
     private static bool IsHeartbeat(string text)
     {
-        return text.Contains("heartbeat", StringComparison.OrdinalIgnoreCase);
+        return text.Contains("heartbeat", StringComparison.OrdinalIgnoreCase) ||
+               text.Contains("пульс", StringComparison.OrdinalIgnoreCase);
     }
 
     private void ToggleHeartbeat()
@@ -118,35 +120,52 @@ public partial class MainWindow : Window
 
     private void UpdateLife(LifeStateDto state)
     {
-        LifeMoodText.Text = $"mood={state.Affect.Mood} valence={state.Affect.Valence:0.00} arousal={state.Affect.Arousal:0.00}";
-        LifeHomeostasisText.Text = $"energy={state.Homeostasis.Energy:0.00} fatigue={state.Homeostasis.Fatigue:0.00} safety={state.Homeostasis.Safety:0.00} pain={state.Homeostasis.Pain:0.00}";
-        LifeInstinctsText.Text = $"instincts: self={state.Instincts.SelfPreservation:0.00} energy={state.Instincts.EnergyConservation:0.00} explore={state.Instincts.Exploration:0.00} attach={state.Instincts.Attachment:0.00} agency={state.Instincts.Agency:0.00}";
-        LifeDecisionText.Text = $"lastDecision={state.LastDecision}";
-        LifeRewardText.Text = $"lastReward={state.LastReward:0.000}  tick={state.Tick}";
+        LifeMoodText.Text = $"настроение={RussianDisplay.Token(state.Affect.Mood)} " +
+                            $"валентность={state.Affect.Valence:0.00} возбуждение={state.Affect.Arousal:0.00}";
+        LifeHomeostasisText.Text = $"энергия={state.Homeostasis.Energy:0.00} " +
+                                   $"усталость={state.Homeostasis.Fatigue:0.00} " +
+                                   $"безопасность={state.Homeostasis.Safety:0.00} " +
+                                   $"боль={state.Homeostasis.Pain:0.00}";
+        LifeInstinctsText.Text = $"инстинкты: самосохранение={state.Instincts.SelfPreservation:0.00} " +
+                                 $"энергосбережение={state.Instincts.EnergyConservation:0.00} " +
+                                 $"исследование={state.Instincts.Exploration:0.00} " +
+                                 $"привязанность={state.Instincts.Attachment:0.00} " +
+                                 $"самостоятельность={state.Instincts.Agency:0.00}";
+        LifeDecisionText.Text = $"последнее решение={RussianDisplay.Token(state.LastDecision)}";
+        LifeRewardText.Text = $"последняя награда={state.LastReward:0.000}  тик={state.Tick}";
         if (state.Reward is not null)
         {
-            LifeRewardBreakdownText.Text = $"reward=tot:{state.Reward.Total:+0.000;-0.000} h:{state.Reward.Homeostasis:+0.000;-0.000} x:{state.Reward.Explore:+0.000;-0.000} s:{state.Reward.Social:+0.000;-0.000} lp:{state.Reward.LoopPenalty:+0.000;-0.000} ia:{state.Reward.InvalidActionPenalty:+0.000;-0.000}";
+            LifeRewardBreakdownText.Text = $"награда=всего:{state.Reward.Total:+0.000;-0.000} " +
+                                           $"гомеостаз:{state.Reward.Homeostasis:+0.000;-0.000} " +
+                                           $"исследование:{state.Reward.Explore:+0.000;-0.000} " +
+                                           $"социальная:{state.Reward.Social:+0.000;-0.000} " +
+                                           $"петля:{state.Reward.LoopPenalty:+0.000;-0.000} " +
+                                           $"недопустимое:{state.Reward.InvalidActionPenalty:+0.000;-0.000}";
         }
         else
         {
-            LifeRewardBreakdownText.Text = "reward=n/a";
+            LifeRewardBreakdownText.Text = "награда=нет данных";
         }
 
         if (state.Episode is not null)
         {
-            LifeEpisodeText.Text = $"episode={state.Episode.EpisodeId} tick={state.Episode.EpisodeTick}/{state.Episode.EpisodeLengthTicks} reason={state.Episode.ResetReason}";
+            LifeEpisodeText.Text = $"эпизод={state.Episode.EpisodeId} " +
+                                   $"тик={state.Episode.EpisodeTick}/{state.Episode.EpisodeLengthTicks} " +
+                                   $"причина={RussianDisplay.Token(state.Episode.ResetReason)}";
         }
         else
         {
-            LifeEpisodeText.Text = "episode=n/a";
+            LifeEpisodeText.Text = "эпизод=нет данных";
         }
         if (state.Scenario is not null)
         {
-            LifeScenarioText.Text = $"scenario={state.Scenario.Name} curriculum={state.Scenario.CurriculumMode} idx={state.Scenario.Index}";
+            LifeScenarioText.Text = $"сценарий={RussianDisplay.Token(state.Scenario.Name)} " +
+                                    $"режим={RussianDisplay.Token(state.Scenario.CurriculumMode)} " +
+                                    $"индекс={state.Scenario.Index}";
         }
         else
         {
-            LifeScenarioText.Text = "scenario=n/a";
+            LifeScenarioText.Text = "сценарий=нет данных";
         }
         if (state.Evaluation is not null)
         {
@@ -154,172 +173,219 @@ public partial class MainWindow : Window
             var anxiousRatio = ClampRatio(state.Evaluation.AnxiousRatio);
             var curiousRatio = ClampRatio(state.Evaluation.CuriousRatio);
             var diversity = ClampRatio(state.Evaluation.ActionDiversity);
-            LifeEvalText.Text = $"eval: reward={state.Evaluation.AvgReward:0.000} loops={Math.Max(0, state.Evaluation.LoopCount)} diversity={diversity:0.00} calm={calmRatio:0.00} anxious={anxiousRatio:0.00} curious={curiousRatio:0.00}";
+            LifeEvalText.Text = $"оценка: награда={state.Evaluation.AvgReward:0.000} " +
+                                $"петли={Math.Max(0, state.Evaluation.LoopCount)} " +
+                                $"разнообразие={diversity:0.00} спокойствие={calmRatio:0.00} " +
+                                $"тревога={anxiousRatio:0.00} любопытство={curiousRatio:0.00}";
         }
         else
         {
-            LifeEvalText.Text = "eval=n/a";
+            LifeEvalText.Text = "оценка=нет данных";
         }
         var policy = state.Policy;
-        LifeStrategyText.Text = $"strategy={policy?.Strategy ?? "n/a"} reason={policy?.Reason ?? ""}";
-        LifeDriveText.Text = $"drive={state.DominantDrive}";
+        LifeStrategyText.Text = $"стратегия={RussianDisplay.Token(policy?.Strategy)} " +
+                                $"причина={RussianDisplay.Token(policy?.Reason)}";
+        LifeDriveText.Text = $"ведущий мотив={RussianDisplay.Token(state.DominantDrive)}";
         if (state.LoopInfo is not null)
         {
-            LifeLoopText.Text = $"loop: in={state.LoopInfo.IsInLoop} type={state.LoopInfo.Type} strength={state.LoopInfo.Strength:0.00} count={state.LoopInfo.ObservedCount} penalty={state.LoopInfo.CurrentPenalty:0.00}";
+            LifeLoopText.Text = $"петля: активна={RussianDisplay.YesNo(state.LoopInfo.IsInLoop)} " +
+                                $"тип={RussianDisplay.Token(state.LoopInfo.Type)} " +
+                                $"сила={state.LoopInfo.Strength:0.00} " +
+                                $"обнаружено={state.LoopInfo.ObservedCount} " +
+                                $"штраф={state.LoopInfo.CurrentPenalty:0.00}";
         }
         else
         {
-            LifeLoopText.Text = $"loop: in=false type=none strength=0.00 count={policy?.LoopCount ?? 0} penalty={Math.Abs(state.Reward?.LoopPenalty ?? 0):0.00}";
+            LifeLoopText.Text = $"петля: активна=нет тип=нет сила=0.00 " +
+                                $"обнаружено={policy?.LoopCount ?? 0} " +
+                                $"штраф={Math.Abs(state.Reward?.LoopPenalty ?? 0):0.00}";
         }
-        LifeAvgRewardText.Text = $"avgRewardShort={policy?.AvgRewardShort:0.000}";
-        LifeInertiaText.Text = $"moodInertia={state.MoodInertia:0.00}";
+        LifeAvgRewardText.Text = $"средняя краткая награда={policy?.AvgRewardShort:0.000}";
+        LifeInertiaText.Text = $"инерция настроения={state.MoodInertia:0.00}";
         if (state.Circadian is not null)
         {
-            LifeCircadianText.Text = $"circadian={state.Circadian.Phase} tod={state.Circadian.TimeOfDay:0.00} sleep={state.Circadian.IsSleeping} pressure={state.Circadian.SleepPressure:0.00}";
+            LifeCircadianText.Text = $"суточная фаза={RussianDisplay.Token(state.Circadian.Phase)} " +
+                                     $"время суток={state.Circadian.TimeOfDay:0.00} " +
+                                     $"сон={RussianDisplay.YesNo(state.Circadian.IsSleeping)} " +
+                                     $"потребность во сне={state.Circadian.SleepPressure:0.00}";
         }
         else
         {
-            LifeCircadianText.Text = "circadian=n/a";
+            LifeCircadianText.Text = "суточный цикл=нет данных";
         }
 
         if (state.ActivePlan is not null)
         {
-            LifePlanText.Text = $"plan={state.ActivePlan.Strategy}/{state.ActivePlan.GoalId} ttl={state.ActivePlan.RemainingTicks}";
+            LifePlanText.Text = $"план={RussianDisplay.Token(state.ActivePlan.Strategy)} / " +
+                                $"{RussianDisplay.Token(state.ActivePlan.GoalId)} " +
+                                $"осталось тиков={state.ActivePlan.RemainingTicks}";
         }
         else
         {
-            LifePlanText.Text = "plan=n/a";
+            LifePlanText.Text = "план=нет данных";
         }
 
-        if (state.Goals is not null)
+        if (state.Goals is not null && state.Goals.Count > 0)
         {
             var parts = state.Goals
                 .Take(4)
-                .Select(g => $"{g.Id}:{g.Urgency:0.00}/{g.Satisfaction:0.00}")
+                .Select(g => $"{RussianDisplay.Token(g.Id)}:{g.Urgency:0.00}/{g.Satisfaction:0.00}")
                 .ToArray();
-            LifeGoalsText.Text = $"goals={string.Join(", ", parts)}";
+            LifeGoalsText.Text = $"цели={string.Join(", ", parts)}";
         }
         else
         {
-            LifeGoalsText.Text = "goals=n/a";
+            LifeGoalsText.Text = "цели=нет данных";
         }
 
         if (state.Attention is not null)
         {
-            var focus2 = string.IsNullOrWhiteSpace(state.Attention.Focus2) ? "" : $"/{state.Attention.Focus2}";
-            LifeAttentionText.Text = $"attention={state.Attention.Focus1}{focus2} intensity={state.Attention.Intensity:0.00} reason={state.Attention.Reason}";
+            var focus2 = string.IsNullOrWhiteSpace(state.Attention.Focus2)
+                ? string.Empty
+                : $" / {RussianDisplay.Token(state.Attention.Focus2)}";
+            LifeAttentionText.Text = $"внимание={RussianDisplay.Token(state.Attention.Focus1)}{focus2} " +
+                                     $"интенсивность={state.Attention.Intensity:0.00} " +
+                                     $"причина={RussianDisplay.Token(state.Attention.Reason)}";
         }
         else
         {
-            LifeAttentionText.Text = "attention=n/a";
+            LifeAttentionText.Text = "внимание=нет данных";
         }
 
         if (state.RecentEvents is not null && state.RecentEvents.Count > 0)
         {
             var eventsLine = state.RecentEvents
                 .TakeLast(5)
-                .Select(e => $"{e.Type}:{e.Severity:0.00} {e.Payload}")
+                .Select(e => $"{RussianDisplay.Token(e.Type)}:{e.Severity:0.00} {RussianDisplay.Token(e.Payload)}")
                 .ToArray();
-            LifeEventsText.Text = $"events={string.Join(" | ", eventsLine)}";
+            LifeEventsText.Text = $"события={string.Join(" | ", eventsLine)}";
         }
         else
         {
-            LifeEventsText.Text = "events=n/a";
+            LifeEventsText.Text = "события=нет данных";
         }
 
         if (state.SemanticNotesTop is not null && state.SemanticNotesTop.Count > 0)
         {
             var notesLine = state.SemanticNotesTop
-                .Select(n => $"{n.Key}->{n.BestAction} {n.Score:0.00} ({n.Samples})")
+                .Select(n => $"{n.Key} → {RussianDisplay.Token(n.BestAction)} {n.Score:0.00} ({n.Samples})")
                 .ToArray();
-            LifeSemanticText.Text = $"semantic={string.Join(" | ", notesLine)}";
+            LifeSemanticText.Text = $"семантическая память={string.Join(" | ", notesLine)}";
         }
         else
         {
-            LifeSemanticText.Text = "semantic=n/a";
+            LifeSemanticText.Text = "семантическая память=нет данных";
         }
 
         if (state.Climate is not null)
         {
-            LifeClimateText.Text = $"climate=calm:{state.Climate.Calm:0.00} stress:{state.Climate.Stress:0.00} tension:{state.Climate.Tension:0.00} base:{state.Climate.BaselineTension:0.00}";
+            LifeClimateText.Text = $"климат=спокойствие:{state.Climate.Calm:0.00} " +
+                                   $"стресс:{state.Climate.Stress:0.00} " +
+                                   $"напряжение:{state.Climate.Tension:0.00} " +
+                                   $"база:{state.Climate.BaselineTension:0.00}";
         }
         else
         {
-            LifeClimateText.Text = "climate=n/a";
+            LifeClimateText.Text = "климат=нет данных";
         }
 
         if (state.PainSource is not null)
         {
-            LifePainSourceText.Text = $"painSource=threat:{state.PainSource.Threat:0.00} fatigue:{state.PainSource.Fatigue:0.00} sleep:{state.PainSource.Sleep:0.00} recovery:{state.PainSource.Recovery:0.00}";
+            LifePainSourceText.Text = $"источник боли=угроза:{state.PainSource.Threat:0.00} " +
+                                      $"усталость:{state.PainSource.Fatigue:0.00} " +
+                                      $"сон:{state.PainSource.Sleep:0.00} " +
+                                      $"восстановление:{state.PainSource.Recovery:0.00}";
         }
         else
         {
-            LifePainSourceText.Text = "painSource=n/a";
+            LifePainSourceText.Text = "источник боли=нет данных";
         }
 
-        LifeConfigText.Text = $"config={state.ConfigVersion ?? "n/a"}";
+        LifeConfigText.Text = $"конфигурация={state.ConfigVersion ?? RussianDisplay.NotAvailable}";
 
         if (state.Appraisal is not null)
         {
-            LifeAppraisalText.Text = $"appraisal=threat:{state.Appraisal.Threat:0.00} novelty:{state.Appraisal.Novelty:0.00} social:{state.Appraisal.Social:0.00} fatigue:{state.Appraisal.Fatigue:0.00}";
+            LifeAppraisalText.Text = $"оценка состояния=угроза:{state.Appraisal.Threat:0.00} " +
+                                     $"новизна:{state.Appraisal.Novelty:0.00} " +
+                                     $"социальное:{state.Appraisal.Social:0.00} " +
+                                     $"усталость:{state.Appraisal.Fatigue:0.00}";
         }
         else
         {
-            LifeAppraisalText.Text = "appraisal=n/a";
+            LifeAppraisalText.Text = "оценка состояния=нет данных";
         }
 
         if (state.Stats is not null)
         {
-            LifeStatsText.Text = $"stats=anxScore:{ClampRatio(state.Stats.AnxiousScore):0.00} calmScore:{ClampRatio(state.Stats.CalmScore):0.00} curiousScore:{ClampRatio(state.Stats.CuriousScore):0.00} p95pain:{state.Stats.P95Pain:0.00}";
+            LifeStatsText.Text = $"статистика=тревога:{ClampRatio(state.Stats.AnxiousScore):0.00} " +
+                                 $"спокойствие:{ClampRatio(state.Stats.CalmScore):0.00} " +
+                                 $"любопытство:{ClampRatio(state.Stats.CuriousScore):0.00} " +
+                                 $"боль p95:{state.Stats.P95Pain:0.00}";
         }
         else
         {
-            LifeStatsText.Text = "stats=n/a";
+            LifeStatsText.Text = "статистика=нет данных";
         }
 
         if (state.Ml is not null)
         {
             var loops = policy?.LoopCount ?? 0;
-            var err = string.IsNullOrWhiteSpace(state.Ml.LastRemoteError) ? "" : $" err:{state.Ml.LastRemoteError}";
+            var err = string.IsNullOrWhiteSpace(state.Ml.LastRemoteError)
+                ? string.Empty
+                : $" ошибка:{state.Ml.LastRemoteError}";
             var reason = !state.Ml.Enabled && !string.IsNullOrWhiteSpace(state.Ml.ReasonIfDisabled)
-                ? $" reason:{state.Ml.ReasonIfDisabled}"
-                : "";
-            LifeMlText.Text = $"ml: enable={state.Ml.Enabled} mode={state.Ml.MlMode} train={state.Ml.TrainEnabled} backend={state.Ml.BackendKind} core={state.Ml.CoreAvailable} remote={state.Ml.RemoteConnected} rtt={state.Ml.RttMs:0}ms eps={state.Ml.Epsilon:0.000} loss={state.Ml.LastLoss:0.000} avgQ={state.Ml.AvgQ:0.000} invalid={state.Ml.InvalidActionFallbackCount} loops={loops} trainEp={state.Ml.TrainingEpisodeCount} evalEp={state.Ml.EvalEpisodeCount}{err}{reason}";
+                ? $" причина:{RussianDisplay.Token(state.Ml.ReasonIfDisabled)}"
+                : string.Empty;
+            LifeMlText.Text = $"ML: включён={RussianDisplay.YesNo(state.Ml.Enabled)} " +
+                              $"режим={RussianDisplay.Token(state.Ml.MlMode)} " +
+                              $"обучение={RussianDisplay.YesNo(state.Ml.TrainEnabled)} " +
+                              $"backend={RussianDisplay.Token(state.Ml.BackendKind)} " +
+                              $"ядро={RussianDisplay.YesNo(state.Ml.CoreAvailable)} " +
+                              $"удалённый={RussianDisplay.YesNo(state.Ml.RemoteConnected)} " +
+                              $"RTT={state.Ml.RttMs:0} мс ε={state.Ml.Epsilon:0.000} " +
+                              $"ошибка обучения={state.Ml.LastLoss:0.000} среднее Q={state.Ml.AvgQ:0.000} " +
+                              $"недопустимых={state.Ml.InvalidActionFallbackCount} петли={loops} " +
+                              $"эпизоды обучения={state.Ml.TrainingEpisodeCount} " +
+                              $"эпизоды оценки={state.Ml.EvalEpisodeCount}{err}{reason}";
         }
         else
         {
-            LifeMlText.Text = "ml=n/a";
+            LifeMlText.Text = "ML=нет данных";
         }
 
         if (state.Character is not null)
         {
             var p = state.Character.Personality;
-            LifeVoiceModeText.Text = $"voiceMode={state.Character.VoiceMode}";
-            LifePersonalityText.Text = $"persona={p.PersonaId} warmth={p.Warmth:0.00} fire={p.Fire:0.00} humor={p.Humor:0.00}";
+            LifeVoiceModeText.Text = $"режим голоса={RussianDisplay.Token(state.Character.VoiceMode)}";
+            LifePersonalityText.Text = $"личность={p.PersonaId} теплота={p.Warmth:0.00} " +
+                                       $"огонь={p.Fire:0.00} юмор={p.Humor:0.00}";
             if (state.Character.HabitsTop is not null && state.Character.HabitsTop.Count > 0)
             {
                 var habitsLine = state.Character.HabitsTop
-                    .Select(h => $"{h.Id}:{h.Strength:0.00} uses={h.Uses} avg={h.AvgReward:0.00}")
+                    .Select(h => $"{RussianDisplay.Token(h.Id)}:{h.Strength:0.00} " +
+                                 $"использований={h.Uses} средняя награда={h.AvgReward:0.00}")
                     .ToArray();
-                LifeHabitsText.Text = $"habits={string.Join(" | ", habitsLine)}";
+                LifeHabitsText.Text = $"привычки={string.Join(" | ", habitsLine)}";
             }
             else
             {
-                LifeHabitsText.Text = "habits=n/a";
+                LifeHabitsText.Text = "привычки=нет данных";
             }
 
-            LifeActiveHabitText.Text = $"activeHabit={state.Character.ActiveHabitId ?? "n/a"} influence={state.Character.HabitInfluence:0.00}";
-            LifeEmitText.Text = $"emitCooldown={state.Character.EmitCooldownRemaining} lastEmitTick={state.Character.LastEmitTick}";
-            LifeConsumedText.Text = $"consumedEvents={state.Character.ConsumedEventsCount}";
+            LifeActiveHabitText.Text = $"активная привычка={RussianDisplay.Token(state.Character.ActiveHabitId)} " +
+                                       $"влияние={state.Character.HabitInfluence:0.00}";
+            LifeEmitText.Text = $"задержка сигнала={state.Character.EmitCooldownRemaining} " +
+                                $"последний сигнал, тик={state.Character.LastEmitTick}";
+            LifeConsumedText.Text = $"обработано событий={state.Character.ConsumedEventsCount}";
         }
         else
         {
-            LifeVoiceModeText.Text = "voiceMode=n/a";
-            LifePersonalityText.Text = "persona=n/a";
-            LifeHabitsText.Text = "habits=n/a";
-            LifeActiveHabitText.Text = "activeHabit=n/a";
-            LifeEmitText.Text = "emitCooldown=n/a";
-            LifeConsumedText.Text = "consumedEvents=n/a";
+            LifeVoiceModeText.Text = "режим голоса=нет данных";
+            LifePersonalityText.Text = "личность=нет данных";
+            LifeHabitsText.Text = "привычки=нет данных";
+            LifeActiveHabitText.Text = "активная привычка=нет данных";
+            LifeEmitText.Text = "задержка сигнала=нет данных";
+            LifeConsumedText.Text = "обработано событий=нет данных";
         }
     }
 
@@ -331,8 +397,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"error: {ex.Message}";
-            AddLog($"error: {ex.Message}");
+            StatusText.Text = $"Ошибка: {ex.Message}";
+            AddLog($"Ошибка: {ex.Message}");
         }
     }
 

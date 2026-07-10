@@ -47,7 +47,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         var resp = await _client.CallAsync<MlInferRequest, MlInferResponse>("ml.infer", req, ct);
         if (resp == null)
         {
-            RateLimitedLog($"warn: ml.infer failed: {_client.LastError}");
+            RateLimitedLog($"Предупреждение: ошибка ml.infer: {_client.LastError}");
             return new MlInferResult(false, Array.Empty<double>(), null, 0, 0);
         }
 
@@ -85,7 +85,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         var resp = await _client.CallAsync<MlTrainRequest, MlTrainResponse>("ml.train", req, ct);
         if (resp == null)
         {
-            RateLimitedLog($"warn: ml.train failed: {_client.LastError}");
+            RateLimitedLog($"Предупреждение: ошибка ml.train: {_client.LastError}");
             return new MlTrainResult(false, double.NaN, 0, _trainSteps, true);
         }
 

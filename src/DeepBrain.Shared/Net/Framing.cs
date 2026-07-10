@@ -24,14 +24,14 @@ public static class Framing
     {
         var lenBuf = new byte[4];
         int read = await ReadUpToAsync(stream, lenBuf, ct).ConfigureAwait(false);
-        if (read == 0) return null; // disconnected cleanly
+        if (read == 0) return null; // Соединение штатно закрыто.
 
         if (read < 4)
-            throw new EndOfStreamException("Disconnected while reading frame length.");
+            throw new EndOfStreamException("Соединение разорвано при чтении длины кадра.");
 
         int len = BinaryPrimitives.ReadInt32LittleEndian(lenBuf);
         if (len <= 0 || len > maxBytes)
-            throw new InvalidDataException($"Frame length {len} is invalid (max {maxBytes}).");
+            throw new InvalidDataException($"Недопустимая длина кадра {len} (максимум {maxBytes}).");
 
         if (len == 0) return Array.Empty<byte>();
 
@@ -79,7 +79,7 @@ public static class Framing
         {
             int n = await stream.ReadAsync(buffer.AsMemory(total, buffer.Length - total), ct).ConfigureAwait(false);
             if (n == 0)
-                throw new EndOfStreamException("Disconnected while reading frame payload.");
+                throw new EndOfStreamException("Соединение разорвано при чтении содержимого кадра.");
             total += n;
         }
     }

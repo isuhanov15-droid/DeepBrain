@@ -58,18 +58,18 @@ public sealed class BrainConfigLoader
             var cfg = JsonSerializer.Deserialize<BrainConfig>(json, _options);
             if (cfg is null)
             {
-                _log($"warn: brainconfig parse returned null, keeping last valid");
+                _log("Предупреждение: разбор brainconfig вернул null; сохранена последняя корректная конфигурация");
                 return;
             }
 
             _current = cfg;
             _lastWrite = lastWrite;
             _version = ComputeHash(json);
-            _log($"info: brainconfig loaded version={_version}");
+            _log($"Конфигурация brainconfig загружена, версия={_version}");
         }
         catch (Exception ex)
         {
-            _log($"warn: brainconfig reload failed: {ex.Message}");
+            _log($"Предупреждение: не удалось перезагрузить brainconfig: {ex.Message}");
         }
     }
 

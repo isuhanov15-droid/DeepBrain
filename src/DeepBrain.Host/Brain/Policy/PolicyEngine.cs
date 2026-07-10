@@ -12,17 +12,17 @@ public sealed class PolicyEngine
         // 1) Команда имеет приоритет
         var cmd = (input.Command ?? "").Trim().ToLowerInvariant();
         if (cmd == "stop")
-            return new Decision("stop", 1.0f, "external command: stop");
+            return new Decision("stop", 1.0f, "внешняя команда: stop");
 
         if (cmd == "step")
-            return new Decision("step", 1.0f, "external command: step");
+            return new Decision("step", 1.0f, "внешняя команда: step");
 
         // 2) Реакция на стресс/энергию
         if (input.Stress > 0.7f)
-            return new Decision("calm", 0.9f, $"high stress: {input.Stress:0.00}");
+            return new Decision("calm", 0.9f, $"высокий стресс: {input.Stress:0.00}");
 
         if (input.Energy < 0.3f)
-            return new Decision("rest", 0.9f, $"low energy: {input.Energy:0.00}");
+            return new Decision("rest", 0.9f, $"низкая энергия: {input.Energy:0.00}");
 
         // 3) Цель
         var goal = (input.Goal ?? "").Trim().ToLowerInvariant();
@@ -34,6 +34,6 @@ public sealed class PolicyEngine
 
         // 4) Фоллбек
         var name = (percept.Tick % 2 == 0) ? "observe" : "wait";
-        return new Decision(name, 0.4f, "fallback: tick parity");
+        return new Decision(name, 0.4f, "резервный выбор: чётность тика");
     }
 }

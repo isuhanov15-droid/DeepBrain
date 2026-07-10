@@ -10,7 +10,7 @@ public sealed class FlexibleBoolArrayConverter : JsonConverter<bool[]>
         if (reader.TokenType == JsonTokenType.Null)
             return Array.Empty<bool>();
         if (reader.TokenType != JsonTokenType.StartArray)
-            throw new JsonException("Expected JSON array for bool[]");
+            throw new JsonException("Ожидался JSON-массив для bool[]");
 
         var list = new List<bool>();
         while (reader.Read())
@@ -20,7 +20,7 @@ public sealed class FlexibleBoolArrayConverter : JsonConverter<bool[]>
             list.Add(ReadBool(ref reader));
         }
 
-        throw new JsonException("Unexpected end of JSON while reading bool[]");
+        throw new JsonException("Неожиданный конец JSON при чтении bool[]");
     }
 
     public override void Write(Utf8JsonWriter writer, bool[] value, JsonSerializerOptions options)
@@ -58,6 +58,6 @@ public sealed class FlexibleBoolArrayConverter : JsonConverter<bool[]>
                 break;
         }
 
-        throw new JsonException($"Invalid bool value token: {reader.TokenType}");
+        throw new JsonException($"Недопустимый токен логического значения: {reader.TokenType}");
     }
 }

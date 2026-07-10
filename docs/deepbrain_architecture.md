@@ -1,51 +1,67 @@
-# DeepBrain v1.0 Architecture
+# Архитектура DeepBrain v1.0
 
-## Overview
-DeepBrain v1.0 is a deterministic autonomous core. It owns world simulation, internal regulation, action selection, episode accounting, and telemetry. Studio is read-only and the ML layer is optional through interfaces.
+## Обзор
+
+DeepBrain v1.0 — детерминированное автономное ядро. Оно отвечает за моделирование мира, внутреннюю регуляцию, выбор действий, учёт эпизодов и телеметрию. Studio работает в режиме наблюдения, а слой ML подключается опционально через интерфейсы.
 
 ## LifeLoop
-- `LifeLoop` is the only runtime orchestrator for the modern brain path.
-- Each tick reads the current config snapshot, advances circadian time, updates world state, homeostasis, appraisal, attention, affect, goals, plans, masking, action selection, reward, learning, memory, and telemetry.
-- The loop does not depend on Studio and talks to transport through delegates.
-- ML is consumed only through `IMlPolicyAdvisor`.
+
+- `LifeLoop` — единственный оркестратор современного пути выполнения мозга.
+- На каждом тике он читает текущий снимок конфигурации, продвигает суточное время и обновляет состояние мира, гомеостаз, оценку состояния, внимание, аффект, цели, планы, маски действий, выбор действия, награду, обучение, память и телеметрию.
+- Цикл не зависит от Studio и взаимодействует с транспортом через делегаты.
+- ML используется только через `IMlPolicyAdvisor`.
 
 ## EpisodeManager
-- Tracks `episodeId`, `episodeTick`, episode length, and reset reason.
-- Terminates episodes on timeout, loop, panic, or manual reset.
-- Starts the next episode without wiping personality, habits, or long-term memory.
+
+- Отслеживает `episodeId`, `episodeTick`, длину эпизода и причину сброса.
+- Завершает эпизод по лимиту времени, при петле, паническом состоянии или ручном сбросе.
+- Запускает следующий эпизод без очистки личности, привычек и долговременной памяти.
 
 ## RewardEngine
-- Produces a stable breakdown every tick:
-  - `homeostasis`
-  - `explore`
-  - `social`
-  - `loopPenalty`
-  - `invalidActionPenalty`
-  - `total`
-- `RewardCalculator` is the stable entry point used by `LifeLoop`.
+
+- На каждом тике формирует стабильное разложение награды:
+  - `homeostasis`;
+  - `explore`;
+  - `social`;
+  - `loopPenalty`;
+  - `invalidActionPenalty`;
+  - `total`.
+- `RewardCalculator` — стабильная точка входа, используемая `LifeLoop`.
 
 ## LoopDetector
-- Detects repeated fingerprints and alternating `ABAB` patterns over a bounded window.
-- Exposes loop strength, streak, loop type, and aggregate counters.
-- Feeds penalties into reward and episode termination.
 
-## Scenario and Curriculum
-- `CurriculumManager` owns the active scenario and progression mode.
-- Scenarios parameterize world climate and event probabilities without changing core logic.
-- Curriculum modes decide when to switch scenarios.
+- Обнаруживает повторяющиеся отпечатки состояния и чередующиеся последовательности `ABAB` в ограниченном окне.
+- Предоставляет силу петли, длину серии, тип петли и агрегированные счётчики.
+- Передаёт штрафы в расчёт награды и механизм завершения эпизода.
 
-## ML Integration
-- `IMlPolicyAdvisor` isolates the brain from ML implementation details.
-- Backends can be `stub`, `local`, or `remote`.
-- Action masks are enforced before and after ML recommendations.
-- Evaluation mode disables training and keeps inference-only telemetry.
+## Сценарии и учебная программа
 
-## Telemetry
-- `LifeStateDto` is the stable telemetry contract for Studio.
-- `Trace` carries compact technical lines plus structured stage data.
-- `Output` carries brain-facing messages only.
-- `Logs` carry system events, configuration, and transport diagnostics.
+- `CurriculumManager` управляет активным сценарием и режимом продвижения.
+- Сценарии задают параметры климата мира и вероятности событий, не изменяя основную логику.
+- Режим учебной программы определяет момент переключения сценариев.
 
-## Reports
-- Finished episodes are serialized as JSONL to `reports/episodes/YYYY-MM-DD/episodes.jsonl`.
-- `PolicyEvaluator` aggregates episode quality over a rolling window for training and evaluation views.
+## Интеграция ML
+
+- `IMlPolicyAdvisor` изолирует мозг от деталей реализации ML.
+- Доступны backend-режимы `stub`, `local` и `remote`.
+- Маски действий применяются до и после рекомендаций ML.
+- Режим оценки отключает обучение и сохраняет только телеметрию инференса.
+
+## Телеметрия
+
+- `LifeStateDto` — стабильный контракт телеметрии для Studio.
+- `Trace` содержит компактные технические строки и структурированные данные этапов.
+- `Output` содержит только сообщения, сформированные мозгом.
+- `Logs` содержит системные события, сообщения конфигурации и диагностику транспорта.
+
+## Локализация
+
+- Машинные контракты, JSON-поля и внутренние идентификаторы остаются английскими.
+- `RussianDisplay` переводит известные идентификаторы только на границе отображения.
+- Studio, консоль, журналы и компактная трассировка используют русский язык.
+- Подробные правила описаны в `docs/localization.md`.
+
+## Отчёты
+
+- Завершённые эпизоды записываются в JSONL: `reports/episodes/YYYY-MM-DD/episodes.jsonl`.
+- `PolicyEvaluator` оценивает качество эпизодов в скользящем окне для режимов обучения и оценки.

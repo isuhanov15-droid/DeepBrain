@@ -64,7 +64,7 @@ public sealed class ConsoleLineFormatterTests
             LoopInfo: new LoopInfoDto(false, 0, 0, 0.0, 0.0, "none", 0)
         );
 
-        Assert.StartsWith("tick=42 ep=2 act=rest_short", ConsoleLineFormatter.FormatTickLine(state));
-        Assert.Equal("scenario=calm_baseline curriculum=round_robin idx=0", ConsoleLineFormatter.FormatScenarioLine(state));
+        Assert.StartsWith("тик=42 эпизод=2 действие=короткий отдых", ConsoleLineFormatter.FormatTickLine(state));
+        Assert.Equal("сценарий=спокойная база режим=по очереди индекс=0", ConsoleLineFormatter.FormatScenarioLine(state));
     }
 }

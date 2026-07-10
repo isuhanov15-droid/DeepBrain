@@ -70,7 +70,7 @@ internal sealed class MlRpcClient : IAsyncDisposable
             _lastRttMs = sw.Elapsed.TotalMilliseconds;
             if (responseJson == null)
             {
-                _lastError = "rpc response null";
+                _lastError = "RPC вернул пустой ответ";
                 Disconnect();
                 return default;
             }
@@ -89,14 +89,14 @@ internal sealed class MlRpcClient : IAsyncDisposable
             }
             if (resp == null)
             {
-                _lastError = "rpc response parse failed";
+                _lastError = "Не удалось разобрать ответ RPC";
                 Disconnect();
                 return default;
             }
 
             if (!resp.ok)
             {
-                _lastError = resp.error?.message ?? "rpc error";
+                _lastError = resp.error?.message ?? "Ошибка RPC";
                 return default;
             }
 
@@ -176,11 +176,11 @@ internal sealed class MlRpcClient : IAsyncDisposable
 
     private async Task WriteFrameAsync(string json, CancellationToken ct)
     {
-        if (_stream == null) throw new InvalidOperationException("stream not connected");
+        if (_stream == null) throw new InvalidOperationException("Поток не подключён");
         var payload = Encoding.UTF8.GetBytes(json);
         var len = payload.Length;
         if (len <= 0 || len > MaxFrameBytes)
-            throw new InvalidDataException($"Invalid payload length: {len}");
+            throw new InvalidDataException($"Недопустимая длина данных: {len}");
         var lenBytes = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(lenBytes.AsSpan(), len);
         await _stream.WriteAsync(lenBytes, ct);
@@ -190,13 +190,13 @@ internal sealed class MlRpcClient : IAsyncDisposable
 
     private async Task<string?> ReadFrameAsync(CancellationToken ct)
     {
-        if (_stream == null) throw new InvalidOperationException("stream not connected");
+        if (_stream == null) throw new InvalidOperationException("Поток не подключён");
         var lenBuf = new byte[4];
         if (!await ReadExactAsync(lenBuf, ct))
             return null;
         var len = BinaryPrimitives.ReadInt32LittleEndian(lenBuf.AsSpan());
         if (len <= 0 || len > MaxFrameBytes)
-            throw new InvalidDataException($"Invalid frame length: {len}");
+            throw new InvalidDataException($"Недопустимая длина кадра: {len}");
         var payload = new byte[len];
         if (!await ReadExactAsync(payload, ct))
             return null;
@@ -224,6 +224,6 @@ internal sealed class MlRpcClient : IAsyncDisposable
     {
         var max = Math.Min(json.Length, 1000);
         var snippet = json[..max];
-        _log($"warn: json parse error ({stage}) path={ex.Path} msg={ex.Message} payload={snippet}");
+        _log($"Предупреждение: ошибка разбора JSON ({stage}) путь={ex.Path} сообщение={ex.Message} данные={snippet}");
     }
 }

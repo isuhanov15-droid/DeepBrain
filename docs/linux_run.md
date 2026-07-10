@@ -1,23 +1,28 @@
-# DeepBrain Linux Run
+# Запуск DeepBrain в Linux
 
-## Target
-- Ubuntu 24.04 or similar
-- .NET SDK 8.0+
+## Требования
 
-## Build
+- Ubuntu 24.04 или совместимый дистрибутив;
+- .NET SDK 8.0 или новее.
+
+## Сборка
+
 ```bash
 dotnet build DeepBrain.slnx
 ```
 
-## Run Host
+## Запуск Host
+
 ```bash
 dotnet run --project src/DeepBrain.Host/DeepBrain.Host.csproj
 ```
 
-Host runs the behavioral core and the built-in console view. If stdout or stdin is redirected, the interactive console renderer and command loop fall back safely.
+Host запускает поведенческое ядро и встроенную консольную панель. Если стандартный ввод или вывод перенаправлен, интерактивная отрисовка и командный цикл безопасно отключаются.
 
-## Run Console Mode
-Console mode is part of `DeepBrain.Host`. Start the host in a terminal and use the built-in commands:
+## Консольный режим
+
+Консоль входит в `DeepBrain.Host`. Запустите Host в терминале и используйте встроенные команды:
+
 - `trace`
 - `mlstatus`
 - `scenario.list`
@@ -25,23 +30,28 @@ Console mode is part of `DeepBrain.Host`. Start the host in a terminal and use t
 - `curriculum.mode <mode>`
 - `reloadconfig`
 
-## Run Studio
-Avalonia Studio is cross-platform, but requires desktop dependencies:
+Команды сохраняют технические английские имена ради совместимости, а ответы и справка выводятся на русском языке.
+
+## Запуск Studio
+
+Studio на Avalonia работает в разных ОС, но требует графических зависимостей:
 
 ```bash
 dotnet run --project src/DeepBrain.Studio/DeepBrain.Studio.csproj
 ```
 
-If the target machine is headless, run only `DeepBrain.Host`.
+На сервере без графической среды запускайте только `DeepBrain.Host`.
 
-## Linux Notes
-- Paths are created via `Path.Combine`.
-- Logs, traces, reports and checkpoints are created relative to the application base directory.
-- File output uses UTF-8 without BOM.
-- TCP transport and framing are platform-neutral.
-- Console rendering is guarded against non-interactive terminals and console size exceptions.
+## Особенности Linux
 
-## Smoke
+- Пути формируются через `Path.Combine`.
+- Журналы, трассировки, отчёты и контрольные точки создаются относительно базового каталога приложения.
+- Файлы записываются в UTF-8 без BOM.
+- TCP-транспорт и фрейминг не зависят от платформы.
+- Отрисовка консоли защищена от неинтерактивных терминалов и ошибок определения размера окна.
+
+## Быстрая проверка
+
 ```bash
 dotnet build DeepBrain.slnx
 dotnet run --project src/DeepBrain.Host/DeepBrain.Host.csproj

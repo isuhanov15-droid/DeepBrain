@@ -62,7 +62,7 @@ public sealed class Actuator
                 break;
 
             case "emit_message":
-                message = "seeking contact";
+                message = "ищу контакт";
                 break;
             case "loop_break":
                 affect = affect with

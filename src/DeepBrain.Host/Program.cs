@@ -7,18 +7,19 @@ using DeepBrain.Host.ConsoleUi;
 using DeepBrain.Host.Infrastructure;
 using DeepBrain.Host.Net;
 using DeepBrain.Shared.Brain;
+using DeepBrain.Shared.Localization;
 using DeepBrain.Shared.Net;
 using DeepBrain.Shared.Trace;
 
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
-    Console.WriteLine("=== UNHANDLED EXCEPTION ===");
+    Console.WriteLine("=== НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ ===");
     Console.WriteLine(e.ExceptionObject?.ToString());
 };
 
 TaskScheduler.UnobservedTaskException += (_, e) =>
 {
-    Console.WriteLine("=== UNOBSERVED TASK EXCEPTION ===");
+    Console.WriteLine("=== НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ ЗАДАЧИ ===");
     Console.WriteLine(e.Exception.ToString());
     e.SetObserved();
 };
@@ -53,11 +54,16 @@ var consoleLock = new object();
 var logBuffer = new List<string>(500);
 var ui = new ConsoleUiState();
 HostConsoleRuntime.Configure(consoleOptions, ui);
-LogLine(consoleLock, logBuffer, logWriter, $"console mode: {HostConsoleRuntime.Mode}, dashboard fps: {consoleOptions.DashboardFps}");
+LogLine(consoleLock, logBuffer, logWriter,
+    $"Режим консоли: {RussianDisplay.Token(HostConsoleRuntime.Mode.ToString())}, " +
+    $"частота панели: {consoleOptions.DashboardFps} кадр/с");
 var configPath = Path.Combine(AppContext.BaseDirectory, "brainconfig.json");
 var configLoader = new BrainConfigLoader(configPath, msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
-LogLine(consoleLock, logBuffer, logWriter, mlCoreAvailable ? "ML.Core: found" : "ML.Core: NOT found, ml.enable forced false if missing");
+LogLine(consoleLock, logBuffer, logWriter,
+    mlCoreAvailable
+        ? "ML.Core: найден"
+        : "ML.Core: не найден, параметр ml.enable будет принудительно отключён");
 lifeLoop = new LifeLoop(
     new WorldSim(seed: 1337),
     new HomeostasisEngine(),
@@ -79,7 +85,7 @@ lifeLoop = new LifeLoop(
         server.BroadcastTraceAsync(trace, ct).GetAwaiter().GetResult();
         var payload = JsonSerializer.Serialize(trace.Data, JsonWire.Options);
         var line = TraceFormatter.FormatCompact(trace);
-        traceWriter.AddLine($"[{DateTime.Now:HH:mm:ss}] trace [{trace.Tick}] {trace.Stage}: {payload}");
+        traceWriter.AddLine($"[{DateTime.Now:HH:mm:ss}] трассировка [{trace.Tick}] этап={trace.Stage}: {payload}");
         if (Volatile.Read(ref traceEnabled) == 1)
         {
             ui.AddTrace(line);
@@ -88,7 +94,8 @@ lifeLoop = new LifeLoop(
     },
     (output, ct) =>
     {
-        LogLine(consoleLock, logBuffer, logWriter, $"[life] OUTPUT tick={output.Tick} clients={server.ClientCount} msg={output.Message}");
+        LogLine(consoleLock, logBuffer, logWriter,
+            $"[жизнь] ВЫВОД тик={output.Tick} клиентов={server.ClientCount} сообщение={output.Message}");
         server.BroadcastLifeOutputAsync(output, ct).GetAwaiter().GetResult();
     },
     msg => LogLine(consoleLock, logBuffer, logWriter, msg)
@@ -96,15 +103,15 @@ lifeLoop = new LifeLoop(
 
 try
 {
-    LogLine(consoleLock, logBuffer, logWriter, "Host booting...");
+    LogLine(consoleLock, logBuffer, logWriter, "Запуск DeepBrain.Host...");
 
     await server.StartAsync(cts.Token);
 
-    LogLine(consoleLock, logBuffer, logWriter, "Host started OK listening on port 5555");
+    LogLine(consoleLock, logBuffer, logWriter, "DeepBrain.Host запущен и слушает порт 5555");
     if (!useLifeLoop)
         brain.Start();
 
-    await server.BroadcastLogAsync($"[{DateTime.Now:HH:mm:ss}] DeepBrain.Host up on 127.0.0.1:5555 OK");
+    await server.BroadcastLogAsync($"[{DateTime.Now:HH:mm:ss}] DeepBrain.Host доступен на 127.0.0.1:5555 ✅");
 
     var heartbeatTask = RunHeartbeatAsync(server, ui, () => consoleLock, logBuffer, logWriter, cts.Token);
     var brainTask = useLifeLoop && lifeLoop is not null
@@ -116,7 +123,8 @@ try
     }
     else
     {
-        LogLine(consoleLock, logBuffer, logWriter, "console command loop disabled: non-interactive input");
+        LogLine(consoleLock, logBuffer, logWriter,
+            "Командная строка отключена: стандартный ввод работает не в интерактивном режиме");
     }
 
     await Task.WhenAll(heartbeatTask, brainTask);
@@ -124,7 +132,7 @@ try
 catch (OperationCanceledException) { }
 catch (Exception ex)
 {
-    LogLine(consoleLock, logBuffer, logWriter, "=== FATAL ERROR IN MAIN ===");
+    LogLine(consoleLock, logBuffer, logWriter, "=== КРИТИЧЕСКАЯ ОШИБКА ОСНОВНОГО ЦИКЛА ===");
     LogLine(consoleLock, logBuffer, logWriter, ex.ToString());
 }
 finally
@@ -146,15 +154,15 @@ static async Task RunHeartbeatAsync(TcpBrainServer server, ConsoleUiState ui, Fu
             TrySetConsoleTitle($"DeepBrain.Host {beat}");
             ui.Heartbeat = "";
             RenderScreen(ui, consoleLockProvider());
-            // heartbeat only in title
-            await server.BroadcastLogAsync($"[{DateTime.Now:HH:mm:ss}] DeepBrain.Host heartbeat {beat}");
+            // Пульс отображается только в заголовке окна.
+            await server.BroadcastLogAsync($"[{DateTime.Now:HH:mm:ss}] Пульс DeepBrain.Host {beat}");
             await Task.Delay(1000, ct);
         }
     }
     catch (OperationCanceledException) { }
     catch (Exception ex)
     {
-        LogLine(consoleLockProvider(), logBuffer, logWriter, "=== HEARTBEAT LOOP CRASH ===");
+        LogLine(consoleLockProvider(), logBuffer, logWriter, "=== СБОЙ ЦИКЛА ПУЛЬСА ===");
         LogLine(consoleLockProvider(), logBuffer, logWriter, ex.ToString());
     }
 }
@@ -182,7 +190,7 @@ static async Task RunBrainLoopAsync(
                 await server.BroadcastTraceAsync(tr, ct);
                 var payload = JsonSerializer.Serialize(tr.Data, jsonOptions);
                 var traceLine = TraceFormatter.FormatCompact(tr);
-                traceWriter.AddLine($"[{DateTime.Now:HH:mm:ss}] trace [{tr.Tick}] {tr.Stage}: {payload}");
+                traceWriter.AddLine($"[{DateTime.Now:HH:mm:ss}] трассировка [{tr.Tick}] этап={tr.Stage}: {payload}");
                 if (traceOn())
                 {
                     ui.AddTrace(traceLine);
@@ -198,7 +206,7 @@ static async Task RunBrainLoopAsync(
     catch (OperationCanceledException) { }
     catch (Exception ex)
     {
-        LogLine(consoleLockProvider(), logBuffer, logWriter, "=== BRAIN LOOP CRASH ===");
+        LogLine(consoleLockProvider(), logBuffer, logWriter, "=== СБОЙ ЦИКЛА МОЗГА ===");
         LogLine(consoleLockProvider(), logBuffer, logWriter, ex.ToString());
     }
 }
@@ -215,7 +223,11 @@ static void RunCommandLoop(
     List<string> logBuffer,
     FileBatchWriter logWriter)
 {
-    LogLine(consoleLockProvider(), logBuffer, logWriter, "Commands: trace, stop, start, logs, resetml, resetepisode, episode.reset, mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, curriculum.mode, curriculum.next, reloadconfig, death, exit");
+    LogLine(consoleLockProvider(), logBuffer, logWriter,
+        "Команды: trace (трассировка), stop/start (остановить/запустить), logs (журнал), " +
+        "resetml (сброс ML), resetepisode или episode.reset (сброс эпизода), " +
+        "mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, " +
+        "curriculum.mode, curriculum.next, reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
@@ -235,21 +247,21 @@ static void RunCommandLoop(
                 if (!traceOn())
                 {
                     setTrace(1);
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, "trace enabled");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, "Трассировка включена");
                 }
                 else
                 {
                     setTrace(0);
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, "trace disabled");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, "Трассировка отключена");
                 }
                 break;
             case "stop":
                 brain.Stop();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "brain stopped");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Мозг остановлен");
                 break;
             case "start":
                 brain.Start();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "brain started");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Мозг запущен");
                 break;
             case "logs":
                 DumpLogs(consoleLockProvider(), logBuffer);
@@ -259,11 +271,11 @@ static void RunCommandLoop(
                 break;
             case "resetepisode":
                 lifeLoop?.RequestEpisodeReset();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "episode reset requested");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Запрошен сброс эпизода");
                 break;
             case "episode.reset":
                 lifeLoop?.RequestEpisodeReset();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "episode reset requested");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Запрошен сброс эпизода");
                 break;
             case "mlstatus":
                 if (lifeLoop is not null)
@@ -273,65 +285,75 @@ static void RunCommandLoop(
                 if (lifeLoop is not null)
                 {
                     var ok = lifeLoop.TryConnectMl();
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, ok ? "ml remote connected" : "ml remote connect failed");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        ok ? "Удалённый ML подключён" : "Не удалось подключить удалённый ML");
                 }
                 break;
             case "mldisconnect":
                 lifeLoop?.DisconnectMl();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "ml remote disconnected");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Удалённый ML отключён");
                 break;
             case "ml.mode":
                 if (string.IsNullOrWhiteSpace(arg))
                 {
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, "ml.mode requires training|evaluation");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        "Для ml.mode требуется значение training (обучение) или evaluation (оценка)");
                     break;
                 }
                 lifeLoop?.SetMlMode(arg);
-                LogLine(consoleLockProvider(), logBuffer, logWriter, $"ml mode set to {arg}");
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    $"Режим ML установлен: {RussianDisplay.Token(arg)}");
                 break;
             case "scenario.list":
                 var scenarios = lifeLoop?.ListScenarios() ?? Array.Empty<string>();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, $"scenarios: {string.Join(", ", scenarios)}");
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    $"Сценарии: {string.Join(", ", scenarios.Select(RussianDisplay.Token))}");
                 break;
             case "scenario.set":
                 if (string.IsNullOrWhiteSpace(arg))
                 {
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, "scenario.set requires <name>");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        "Для scenario.set требуется техническое имя сценария");
                     break;
                 }
                 if (lifeLoop?.TrySetScenario(arg) == true)
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"scenario set: {arg}");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        $"Сценарий установлен: {RussianDisplay.Token(arg)}");
                 else
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"scenario not found: {arg}");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        $"Сценарий не найден: {arg}");
                 break;
             case "curriculum.mode":
                 if (string.IsNullOrWhiteSpace(arg))
                 {
-                    LogLine(consoleLockProvider(), logBuffer, logWriter, "curriculum.mode requires fixed|round_robin|reward_gated|random_seeded");
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        "Для curriculum.mode требуется fixed, round_robin, reward_gated или random_seeded");
                     break;
                 }
                 lifeLoop?.SetCurriculumMode(arg);
-                LogLine(consoleLockProvider(), logBuffer, logWriter, $"curriculum mode set to {arg}");
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    $"Режим учебной программы установлен: {RussianDisplay.Token(arg)}");
                 break;
             case "curriculum.next":
                 lifeLoop?.NextScenario();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "curriculum advanced to next scenario");
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    "Учебная программа перешла к следующему сценарию");
                 break;
             case "reloadconfig":
                 configLoader.ReloadNow();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "config reload requested");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Запрошена перезагрузка конфигурации");
                 break;
             case "death":
                 brain.Stop();
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "host stopping...");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Остановка Host...");
                 cts.Cancel();
                 return;
             case "exit":
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "exit requested");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Запрошен выход");
                 cts.Cancel();
                 return;
             default:
-                LogLine(consoleLockProvider(), logBuffer, logWriter, "unknown command");
+                LogLine(consoleLockProvider(), logBuffer, logWriter, "Неизвестная команда");
                 break;
         }
 
@@ -409,10 +431,10 @@ static void DumpLogs(object consoleLock, List<string> buffer)
 {
     lock (consoleLock)
     {
-        Console.WriteLine("=== LOG BUFFER ===");
+        Console.WriteLine("=== БУФЕР ЖУРНАЛА ===");
         foreach (var line in buffer)
             Console.WriteLine(line);
-        Console.WriteLine("=== END LOG BUFFER ===");
+        Console.WriteLine("=== КОНЕЦ БУФЕРА ЖУРНАЛА ===");
     }
 }
 
@@ -497,7 +519,7 @@ sealed class ConsoleUiState
     private readonly List<string> _lastFrame = new();
     private LifeStateDto? _lastState;
 
-    public string Heartbeat { get; set; } = "Heartbeat: _/\\_";
+    public string Heartbeat { get; set; } = "Пульс: _/\\_";
 
     public void UpdateState(LifeStateDto state)
     {
@@ -543,12 +565,12 @@ sealed class ConsoleUiState
             ConsoleLineFormatter.FormatRewardLine(_lastState),
             ConsoleLineFormatter.FormatEpisodeLine(_lastState),
             ConsoleLineFormatter.FormatScenarioLine(_lastState),
-            "Logs:"
+            "Журнал:"
         };
 
         var logHeight = Math.Min(5, Math.Max(0, safeHeight - lines.Count - 1));
         lines.AddRange(GetLogSnapshot(logHeight));
-        lines.Add("Trace:");
+        lines.Add("Трассировка:");
 
         var traceHeight = Math.Max(0, safeHeight - lines.Count);
         lines.AddRange(GetTraceSnapshot(traceHeight));
@@ -597,7 +619,10 @@ sealed class FileBatchWriter
         var dir = HostPaths.GetDataDirectory(baseDir, folderName);
         Directory.CreateDirectory(dir);
         _filePath = HostPaths.GetLogFilePath(baseDir, folderName, filePrefix, startTime);
-        File.AppendAllText(_filePath, $"=== DeepBrain.Host started {startTime:yyyy-MM-dd HH:mm:ss} ==={Environment.NewLine}", new System.Text.UTF8Encoding(false));
+        File.AppendAllText(
+            _filePath,
+            $"=== DeepBrain.Host запущен {startTime:yyyy-MM-dd HH:mm:ss} ==={Environment.NewLine}",
+            new System.Text.UTF8Encoding(false));
     }
 
     public void AddLine(string line)

@@ -21,15 +21,15 @@ public sealed record Envelope
         Payload = payload;
     }
 
-    // 3 args: type + id + payload
+    // Три аргумента: тип + идентификатор + данные.
     public Envelope(string type, string id, object? payload)
         : this(type, id, NowMs(), payload) { }
 
-    // 2 args: type + payload
+    // Два аргумента: тип + данные.
     public Envelope(string type, object? payload)
         : this(type, NewId(), NowMs(), payload) { }
 
-    // 2 args: type + id
+    // Два аргумента: тип + идентификатор.
     public Envelope(string type, string id)
         : this(type, id, NowMs(), null) { }
 }

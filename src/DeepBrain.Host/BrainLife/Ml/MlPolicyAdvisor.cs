@@ -82,7 +82,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         }
         catch (Exception ex)
         {
-            _log($"warn: ml.infer failed: {ex.Message}");
+            _log($"Предупреждение: ошибка ml.infer: {ex.Message}");
             return new PolicyDecision(heuristicBest, 0, 0, 0, "heuristic", false, false, false);
         }
 
@@ -148,7 +148,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         {
             _nanSkips++;
             if (tick % 200 == 0)
-                _log("warn: ML train skipped due to NaN/Inf");
+                _log("Предупреждение: шаг обучения ML пропущен из-за NaN/Inf");
             return;
         }
 
@@ -284,7 +284,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         _backendKind = _backend.Kind;
         _ = old.DisposeAsync();
         if (config.LogBackendSwitches)
-            RateLimitedBackendLog($"info: ML backend switched to {_backendKind}");
+            RateLimitedBackendLog($"ML backend переключён на {_backendKind}");
     }
 
     private void RateLimitedBackendLog(string message)
