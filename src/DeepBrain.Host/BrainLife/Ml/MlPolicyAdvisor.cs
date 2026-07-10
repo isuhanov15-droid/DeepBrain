@@ -101,8 +101,8 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
             MlMath.ApplyMask(probs, mask);
 
         _entropy = MlMath.ComputeEntropy(probs);
-        var netWeight = ComputeNetWeight(config, _backend.BufferSize);
-        var epsilon = ComputeEpsilon(config);
+        var netWeight = ComputeNetWeight(config, _backend.BufferSize, _backend.TrainSteps);
+        var epsilon = ComputeEpsilon(config, _backend.BufferSize, _backend.TrainSteps);
 
         var finalScores = BlendScores(heuristicScores, probs.Select(p => (float)p).ToArray(), netWeight);
         var actionName = ChooseAction(finalScores, allowedActions, epsilon, _rng);
@@ -298,20 +298,16 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         _log(message);
     }
 
-    private double ComputeNetWeight(MlConfig config, int bufferSize)
+    private double ComputeNetWeight(MlConfig config, int bufferSize, long trainSteps)
     {
-        var warm = Math.Max(1.0, config.NetWeightWarmup);
-        var t = Math.Clamp(bufferSize / warm, 0.0, 1.0);
-        var w = config.NetWeightMax * t;
+        var w = MlPolicySchedule.ComputeNetWeight(config, bufferSize, trainSteps);
         _lastNetWeight = w;
         return w;
     }
 
-    private double ComputeEpsilon(MlConfig config)
+    private double ComputeEpsilon(MlConfig config, int bufferSize, long trainSteps)
     {
-        if (_epsilon < 0) _epsilon = config.EpsilonStart;
-        var min = config.EpsilonMin > 0 ? config.EpsilonMin : config.EpsilonEnd;
-        _epsilon = Math.Max(min, _epsilon - config.EpsilonDecay);
+        _epsilon = MlPolicySchedule.NextEpsilon(config, _epsilon, bufferSize, trainSteps);
         var eps = _epsilon;
         _lastEpsilon = eps;
         return eps;

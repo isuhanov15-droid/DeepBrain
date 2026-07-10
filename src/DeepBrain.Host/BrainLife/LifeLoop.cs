@@ -210,13 +210,27 @@ public sealed class LifeLoop
         var mlMode = ResolveMlMode(mlCfg);
         var trainEnabled = mlMode != "evaluation" && enabled;
         var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount);
+        var lastError = string.IsNullOrWhiteSpace(t.LastRemoteError)
+            ? "нет"
+            : RussianDisplay.Token(t.LastRemoteError);
+        var disabledReason = enabled
+            ? "не применимо"
+            : RussianDisplay.Token(reason);
         return $"включён={RussianDisplay.YesNo(enabled)} " +
                $"backend={RussianDisplay.Token(t.BackendKind)} " +
-               $"ядро доступно={RussianDisplay.YesNo(t.CoreAvailable)} " +
+               $"локальное ядро доступно={RussianDisplay.YesNo(t.CoreAvailable)} " +
                $"удалённое соединение={RussianDisplay.YesNo(t.RemoteConnected)} " +
                $"RTT={t.RttMs:0} мс " +
-               $"последняя ошибка={RussianDisplay.Token(t.LastRemoteError)} " +
-               $"причина отключения={RussianDisplay.Token(reason)}";
+               $"режим={RussianDisplay.Token(t.MlMode)} " +
+               $"обучение={RussianDisplay.YesNo(t.TrainEnabled)} " +
+               $"источник={RussianDisplay.Token(t.PolicySource)} " +
+               $"буфер={t.BufferSize}/{t.BufferCapacity} " +
+               $"шаги={t.TrainSteps} " +
+               $"ε={t.Epsilon:0.000} " +
+               $"вес сети={t.NetWeight:0.00} " +
+               $"loss={t.LastLoss:0.000} " +
+               $"последняя ошибка={lastError} " +
+               $"причина отключения={disabledReason}";
     }
 
     public bool TryConnectMl() => _ml.TryConnectRemote();
@@ -534,14 +548,18 @@ public sealed class LifeLoop
         var maskFallback = false;
         if (candidates.Count == 0)
         {
-            var fallback = FirstAllowed(actionMask) ?? "rest_short";
-            candidates.Add(new ActionSelector.Candidate(new ActionDto("internal", fallback, 0.2, null), 0.1 + (1 - _homeo.Energy), "mask_fallback"));
+            var recoveryActions = ActionCatalog.Actions
+                .Where(action => IsMaskAllowed(actionMask, action))
+                .ToList();
+            candidates.AddRange(_selector.BuildRecoveryCandidates(recoveryActions, _learning, _cooldowns, _tick));
             maskFallback = true;
         }
 
-        var allowedActions = mlConfigEffective.ActionMasking
-            ? ActionCatalog.Actions.Where((_, i) => i < actionMask.Length && actionMask[i] > 0).ToList()
-            : candidates.Select(c => c.Action.Name).Distinct().ToList();
+        var allowedActions = candidates
+            .Select(c => c.Action.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var decisionMask = BuildCandidateMask(actionMask, allowedActions);
         var heuristicScores = ActionCatalog.Actions.ToDictionary(a => a, _ => double.NegativeInfinity, StringComparer.Ordinal);
         foreach (var c in candidates)
         {
@@ -567,7 +585,7 @@ public sealed class LifeLoop
             ))
             : Array.Empty<float>();
 
-        var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, actionMask, mlConfigEffective, _tick);
+        var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, decisionMask, mlConfigEffective, _tick);
         var chosen = candidates.FirstOrDefault(c => c.Action.Name == decision.ActionName) ?? ActionSelector.PickBest(candidates);
         var action = chosen.Action;
         var maskStatus = maskFallback ? "fallback" : "ok";
@@ -1399,14 +1417,16 @@ public sealed class LifeLoop
         return mask[idx] > 0f;
     }
 
-    private static string? FirstAllowed(float[] mask)
+    private static float[] BuildCandidateMask(float[] environmentMask, IReadOnlyCollection<string> candidateActions)
     {
-        for (var i = 0; i < mask.Length; i++)
+        var candidateSet = new HashSet<string>(candidateActions, StringComparer.Ordinal);
+        var result = new float[ActionCatalog.Count];
+        for (var i = 0; i < result.Length; i++)
         {
-            if (mask[i] > 0f)
-                return ActionCatalog.Actions[i];
+            var environmentAllows = i < environmentMask.Length && environmentMask[i] > 0f;
+            result[i] = environmentAllows && candidateSet.Contains(ActionCatalog.Actions[i]) ? 1f : 0f;
         }
-        return null;
+        return result;
     }
 
     private static void TryDeleteCheckpoint(string path)

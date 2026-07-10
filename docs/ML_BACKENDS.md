@@ -45,5 +45,7 @@ dotnet build DeepBrain.slnx -p:ML_CORE_PATH="C:\path\to\ML.Core\ML.Core.csproj"
    → "remote not connected: run mlconnect or check host/port"
 
 ## Команды
-- `mlstatus` — текущий статус ML и причина отключения.
+- `mlstatus` — подключение, режим, источник политики, replay-буфер, шаги обучения, ε, вес сети, loss и причина отключения.
 - `mlconnect` / `mldisconnect` — ручное подключение/отключение remote backend.
+
+После загрузки checkpoint вес сети учитывает сохранённые шаги обучения, даже если replay-буфер нового процесса ещё пуст. Снижение ε для новой политики начинается после накопления как минимум одного batch опыта.

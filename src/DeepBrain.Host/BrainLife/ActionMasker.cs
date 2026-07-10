@@ -35,6 +35,16 @@ public sealed class ActionMasker
         ApplyCooldown(mask, "explore_signal", cooldowns, tick, actions.ExploreSignal);
         ApplyCooldown(mask, "emit_message", cooldowns, tick, emitCooldownTicks);
 
+        // The policy must always have at least one executable action. If every
+        // contextual action is on cooldown, focus_widen is the neutral recovery
+        // action and may run once without waiting for its cooldown.
+        if (mask.All(v => v <= 0f))
+        {
+            var recoveryIndex = ActionCatalog.IndexOf("focus_widen");
+            if (recoveryIndex >= 0)
+                mask[recoveryIndex] = 1f;
+        }
+
         return mask;
     }
 

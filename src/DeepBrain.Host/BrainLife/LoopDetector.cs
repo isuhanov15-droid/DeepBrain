@@ -10,6 +10,7 @@ public sealed class LoopDetector
     private int _sameK = 8;
     private int _altK = 6;
     private const int RewardWindow = 15;
+    private const double ProductiveRewardFloor = 0.0;
 
     private bool _inLoop;
     private long _lastLoopAnnounceTick = -1000;
@@ -34,6 +35,7 @@ public sealed class LoopDetector
     public bool LoopTypeChanged { get; private set; }
     public bool RecoveredFromLoop { get; private set; }
     public bool LoopEscalated { get; private set; }
+    public bool IsProgressStalled { get; private set; }
 
     public void Configure(int window, int sameK, int altK)
     {
@@ -93,9 +95,24 @@ public sealed class LoopDetector
         _lastFingerprint = fingerprint;
         _lastStateKey = stateKey;
 
-        var repeatLoop = _repeatStreak >= _sameK;
-        var altLoop = DetectAltLoop(_altK);
-        var stuckState = _stateStreak >= _sameK && !repeatLoop;
+        // A stable or repeated pattern is not automatically harmful. Calm states
+        // and useful regulation actions may legitimately persist for many ticks.
+        // Treat a pattern as a loop only after the short reward window shows that
+        // it is no longer producing progress.
+        var rewardIsUnproductive = AvgRewardShort <= ProductiveRewardFloor;
+        var repeatHasEvidence = _recentRewards.Count >= _sameK;
+        var altPatternLength = _altK * 2;
+        var altHasEvidence = _recentRewards.Count >= altPatternLength;
+        IsProgressStalled = rewardIsUnproductive
+            && _recentRewards.Count >= Math.Min(_sameK, altPatternLength);
+        var repeatLoop = _repeatStreak >= _sameK && repeatHasEvidence && rewardIsUnproductive;
+        var altLoop = DetectAltLoop(_altK) && altHasEvidence && rewardIsUnproductive;
+        var stuckThreshold = Math.Max(_sameK * 2, _sameK + 2);
+        var stuckState = _stateStreak >= stuckThreshold
+            && repeatHasEvidence
+            && rewardIsUnproductive
+            && !repeatLoop
+            && !altLoop;
 
         if (repeatLoop)
         {
@@ -113,7 +130,7 @@ public sealed class LoopDetector
         {
             LoopType = "stuck_state";
             Streak = _stateStreak;
-            LoopStrength = Math.Min(1.0, _stateStreak / (double)_sameK);
+            LoopStrength = Math.Min(1.0, _stateStreak / (double)stuckThreshold);
         }
         else
         {
@@ -174,6 +191,7 @@ public sealed class LoopDetector
         LoopTypeChanged = false;
         RecoveredFromLoop = false;
         LoopEscalated = false;
+        IsProgressStalled = false;
         _repeatStreak = 0;
         _stateStreak = 0;
         _lastFingerprint = "";

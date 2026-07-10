@@ -57,7 +57,8 @@ HostConsoleRuntime.Configure(consoleOptions, ui);
 LogLine(consoleLock, logBuffer, logWriter,
     $"Режим консоли: {RussianDisplay.Token(HostConsoleRuntime.Mode.ToString())}, " +
     $"частота панели: {consoleOptions.DashboardFps} кадр/с");
-var configPath = Path.Combine(AppContext.BaseDirectory, "brainconfig.json");
+var configPath = HostConfigPathResolver.Resolve(args, AppContext.BaseDirectory);
+LogLine(consoleLock, logBuffer, logWriter, $"Конфигурация: {configPath}");
 var configLoader = new BrainConfigLoader(configPath, msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
 LogLine(consoleLock, logBuffer, logWriter,
@@ -103,7 +104,8 @@ lifeLoop = new LifeLoop(
 
 try
 {
-    LogLine(consoleLock, logBuffer, logWriter, "Запуск DeepBrain.Host...");
+    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.0.2";
+    LogLine(consoleLock, logBuffer, logWriter, $"Запуск DeepBrain.Host v{hostVersion}...");
 
     await server.StartAsync(cts.Token);
 

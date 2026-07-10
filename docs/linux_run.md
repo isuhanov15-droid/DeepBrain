@@ -8,7 +8,7 @@
 ## Сборка
 
 ```bash
-dotnet build DeepBrain.slnx
+dotnet build DeepBrain.sln
 ```
 
 ## Запуск Host
@@ -18,6 +18,16 @@ dotnet run --project src/DeepBrain.Host/DeepBrain.Host.csproj
 ```
 
 Host запускает поведенческое ядро и встроенную консольную панель. Если стандартный ввод или вывод перенаправлен, интерактивная отрисовка и командный цикл безопасно отключаются.
+
+Рабочую конфигурацию сервера рекомендуется хранить вне `bin` и передавать явно:
+
+```bash
+dotnet run --project src/DeepBrain.Host/DeepBrain.Host.csproj -- \
+  --config /etc/deepbrain/brainconfig.json \
+  --console logs
+```
+
+Альтернативно задайте переменную окружения `DEEPBRAIN_CONFIG_PATH`. Аргумент `--config` имеет приоритет над переменной окружения.
 
 ## Консольный режим
 
@@ -53,6 +63,6 @@ dotnet run --project src/DeepBrain.Studio/DeepBrain.Studio.csproj
 ## Быстрая проверка
 
 ```bash
-dotnet build DeepBrain.slnx
+dotnet build DeepBrain.sln
 dotnet run --project src/DeepBrain.Host/DeepBrain.Host.csproj
 ```

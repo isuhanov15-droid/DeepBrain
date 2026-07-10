@@ -1,4 +1,5 @@
 using System.Linq;
+using DeepBrain.Host.BrainLife.Ml;
 using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.BrainDtos.V6;
 
@@ -107,6 +108,12 @@ public sealed class ActionSelector
         if (IsAllowed(strategy, "connect") || instincts.Attachment >= 0.6)
             list.Add(Make("external", "emit_message", instincts.Attachment, "attachment", learning));
 
+        if (IsAllowed(strategy, "focus"))
+        {
+            list.Add(Make("internal", "focus_narrow", 0.30 + instincts.Agency * 0.25, "focus", learning));
+            list.Add(Make("internal", "focus_widen", 0.30 + instincts.Exploration * 0.25, "focus", learning));
+        }
+
         if (IsAllowed(strategy, "regulate") || affect.Mood == "frustrated" || instincts.Agency > 0.6)
         {
             list.Add(Make("internal", "reframe_negative", instincts.Agency, "agency", learning));
@@ -115,6 +122,13 @@ public sealed class ActionSelector
 
         if (loop.IsLoopDetected)
             list.Add(Make("internal", "loop_break", 0.6 + loop.LoopPenalty, "loop_break", learning));
+
+        // Focus actions are neutral and keep the policy executable while a
+        // strategy-specific action (for example rest_short) is on cooldown.
+        if (list.All(c => c.Action.Name != "focus_narrow"))
+            list.Add(Make("internal", "focus_narrow", 0.15 + instincts.Agency * 0.10, "baseline", learning));
+        if (list.All(c => c.Action.Name != "focus_widen"))
+            list.Add(Make("internal", "focus_widen", 0.15 + instincts.Exploration * 0.10, "baseline", learning));
 
         if (list.Count == 0)
             list.Add(Make("internal", "rest_short", 0.2 + (1 - homeo.Energy), "fallback", learning));
@@ -128,6 +142,33 @@ public sealed class ActionSelector
         ApplyVarietyBonus(list, cooldowns, tick, allowVariety);
         ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks, actionsConfig);
         return (list, strategy);
+    }
+
+    public List<Candidate> BuildRecoveryCandidates(
+        IReadOnlyList<string> allowedActions,
+        LearningEngine learning,
+        ActionCooldowns cooldowns,
+        long tick)
+    {
+        var result = new List<Candidate>();
+        foreach (var actionName in allowedActions.Distinct(StringComparer.Ordinal))
+        {
+            if (ActionCatalog.IndexOf(actionName) < 0)
+                continue;
+
+            var lastTick = cooldowns.GetLastTick(actionName);
+            var gap = lastTick < 0 ? 20 : Math.Max(0, tick - lastTick);
+            var recencyBonus = Math.Min(0.20, gap * 0.01);
+            var kind = actionName is "explore_signal" or "emit_message" ? "external" : "internal";
+            var strength = 0.10 + recencyBonus;
+            var score = strength + learning.GetEma(actionName) * 0.2;
+            result.Add(new Candidate(
+                new ActionDto(kind, actionName, LifeMath.Clamp01(strength), null),
+                score,
+                "mask_fallback"));
+        }
+
+        return result;
     }
 
     private static Candidate Make(string kind, string name, double baseScore, string reason, LearningEngine learning)

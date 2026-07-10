@@ -22,7 +22,7 @@ public sealed class LoopDetectorTests
                 dominantDrive: "energy_conservation",
                 phase: "morning",
                 attentionFocus: "body",
-                reward: 0.01,
+                reward: -0.01,
                 tick: i);
         }
 
@@ -51,7 +51,7 @@ public sealed class LoopDetectorTests
                 dominantDrive: "energy_conservation",
                 phase: "morning",
                 attentionFocus: "body",
-                reward: 0.01,
+                reward: -0.01,
                 tick: i);
         }
 
@@ -67,7 +67,7 @@ public sealed class LoopDetectorTests
 
         for (var i = 0; i < 4; i++)
         {
-            loop.Update("rest_short", "calm", 0.2, 0.8, 0.2, "energy_conservation", "morning", "body", 0.01, i);
+            loop.Update("rest_short", "calm", 0.2, 0.8, 0.2, "energy_conservation", "morning", "body", -0.01, i);
         }
 
         Assert.True(loop.IsInLoop);
@@ -76,5 +76,54 @@ public sealed class LoopDetectorTests
 
         Assert.False(loop.IsInLoop);
         Assert.True(loop.RecoveredFromLoop);
+    }
+
+    [Fact]
+    public void ProductiveStableStateDoesNotTriggerLoop()
+    {
+        var loop = new LoopDetector();
+        loop.Configure(window: 32, sameK: 4, altK: 3);
+
+        for (var i = 0; i < 20; i++)
+        {
+            loop.Update(
+                actionName: "rest_short",
+                mood: "calm",
+                arousal: 0.2,
+                energy: 0.8,
+                fatigue: 0.2,
+                dominantDrive: "energy_conservation",
+                phase: "morning",
+                attentionFocus: "body",
+                reward: 0.01,
+                tick: i);
+        }
+
+        Assert.False(loop.IsProgressStalled);
+        Assert.False(loop.IsLoopDetected);
+        Assert.Equal("none", loop.LoopType);
+    }
+
+    [Fact]
+    public void UnproductiveStableStateRequiresExtendedConfirmation()
+    {
+        var loop = new LoopDetector();
+        loop.Configure(window: 32, sameK: 4, altK: 3);
+        var actions = new[] { "rest_short", "focus_widen", "breathe_slow", "focus_narrow" };
+
+        for (var i = 0; i < 7; i++)
+        {
+            loop.Update(actions[i % actions.Length], "calm", 0.2, 0.8, 0.2,
+                "energy_conservation", "morning", "body", -0.01, i);
+        }
+
+        Assert.False(loop.IsLoopDetected);
+
+        loop.Update(actions[3], "calm", 0.2, 0.8, 0.2,
+            "energy_conservation", "morning", "body", -0.01, 7);
+
+        Assert.True(loop.IsProgressStalled);
+        Assert.True(loop.IsLoopDetected);
+        Assert.Equal("stuck_state", loop.LoopType);
     }
 }
