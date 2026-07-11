@@ -1,5 +1,3 @@
-using System.Linq;
-
 namespace DeepBrain.Host.BrainLife;
 
 public sealed class ScenarioScorer
@@ -12,7 +10,7 @@ public sealed class ScenarioScorer
         var anxiousRatio = report.MoodDistribution.TryGetValue("anxious", out var anx) ? anx / (double)steps : 0.0;
         var calmRatio = report.MoodDistribution.TryGetValue("calm", out var calm) ? calm / (double)steps : 0.0;
         var curiousRatio = report.MoodDistribution.TryGetValue("curious", out var cur) ? cur / (double)steps : 0.0;
-        var actionDiversity = ComputeActionDiversity(report.ActionHistogram);
+        var actionDiversity = ActionDiversity.Calculate(report.ActionHistogram);
 
         return name switch
         {
@@ -38,10 +36,4 @@ public sealed class ScenarioScorer
         };
     }
 
-    private static double ComputeActionDiversity(IReadOnlyDictionary<string, int> histogram)
-    {
-        var total = histogram.Sum(kv => kv.Value);
-        if (total <= 0) return 0;
-        return histogram.Count / (double)total;
-    }
 }
