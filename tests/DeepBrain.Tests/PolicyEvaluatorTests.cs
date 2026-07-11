@@ -33,7 +33,36 @@ public sealed class PolicyEvaluatorTests
         Assert.True(snapshot.CuriousCount >= 0);
     }
 
-    private static EpisodeReport BuildReport(int steps, double totalReward, int loopCount, Dictionary<string, int> moods)
+    [Fact]
+    public void ActionDiversityUsesDistributionInsteadOfEpisodeLength()
+    {
+        var evaluator = new PolicyEvaluator(new ScenarioScorer());
+        evaluator.Configure(new EvaluationConfig(10, true));
+        evaluator.Add(
+            BuildReport(
+                steps: 1000,
+                totalReward: 10.0,
+                loopCount: 0,
+                moods: new Dictionary<string, int> { ["calm"] = 1000 },
+                actions: new Dictionary<string, int>
+                {
+                    ["focus_widen"] = 500,
+                    ["focus_narrow"] = 400,
+                    ["rest_short"] = 100
+                }),
+            isEvaluation: true);
+
+        var snapshot = evaluator.Snapshot(isEvaluation: true);
+
+        Assert.InRange(snapshot.ActionDiversity, 0.57, 0.59);
+    }
+
+    private static EpisodeReport BuildReport(
+        int steps,
+        double totalReward,
+        int loopCount,
+        Dictionary<string, int> moods,
+        Dictionary<string, int>? actions = null)
     {
         return new EpisodeReport(
             EpisodeId: 1,
@@ -45,7 +74,7 @@ public sealed class PolicyEvaluatorTests
             AvgReward: totalReward / steps,
             TotalReward: totalReward,
             RewardBreakdownAvg: new RewardDto(0, 0, 0, 0, 0, totalReward / steps),
-            ActionHistogram: new Dictionary<string, int> { ["rest_short"] = steps },
+            ActionHistogram: actions ?? new Dictionary<string, int> { ["rest_short"] = steps },
             LoopCount: loopCount,
             MaxLoopStrength: 0.4,
             MoodDistribution: moods,

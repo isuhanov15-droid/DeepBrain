@@ -27,6 +27,7 @@ public sealed class LifeLoop
     private readonly Action<string> _log;
     private readonly BrainConfigLoader _configLoader;
     private readonly EpisodeMemory _memory = new();
+    private readonly PersistentEpisodicMemory _longTermMemory;
     private readonly LoopDetector _loop = new();
     private readonly EpisodeManager _episode;
     private readonly MoodInertiaEngine _inertia = new();
@@ -156,6 +157,8 @@ public sealed class LifeLoop
         _output = output;
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
+        _longTermMemory = new PersistentEpisodicMemory(_log);
+        _longTermMemory.Configure(cfg.Memory ?? MemoryConfig.Default);
         _episode = new EpisodeManager(cfg.Episode.MaxSteps);
         _curriculum = new CurriculumManager(cfg.Ml.Seed);
         _policyEvaluator = new PolicyEvaluator(_scenarioScorer);
@@ -236,6 +239,38 @@ public sealed class LifeLoop
     public bool TryConnectMl() => _ml.TryConnectRemote();
     public void DisconnectMl() => _ml.DisconnectRemote();
 
+    public string GetMemoryStatus()
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        var status = _longTermMemory.GetStatus();
+        var lastStored = status.LastStoredAt?.ToString("O") ?? "нет";
+        var lastError = string.IsNullOrWhiteSpace(status.LastError) ? "нет" : status.LastError;
+        return $"включена={RussianDisplay.YesNo(status.Enabled)} " +
+               $"эпизодов={status.EpisodeCount}/{status.Capacity} " +
+               $"запросов воспоминаний={status.RecallRequests} " +
+               $"последний поиск={status.LastRecallCount} " +
+               $"сходство={status.LastBestSimilarity:0.000} " +
+               $"последняя запись={lastStored} " +
+               $"повреждённых строк={status.InvalidLines} " +
+               $"ошибка={lastError} " +
+               $"путь={status.Path}";
+    }
+
+    public IReadOnlyList<string> GetRecentMemoryLines(int count)
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        return _longTermMemory.GetRecent(count).Select(FormatMemoryEntry).ToList();
+    }
+
+    public IReadOnlyList<string> SearchMemoryLines(string query, int count)
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        return _longTermMemory.Search(query, count).Select(FormatMemoryEntry).ToList();
+    }
+
     private static (bool Enabled, string? Reason) ComputeMlEnabled(MlConfig cfg, string backendKind, bool remoteStrict, bool remoteConnected)
     {
         if (!cfg.Enable)
@@ -287,6 +322,8 @@ public sealed class LifeLoop
         _configVersion = version;
         var curriculumCfg = config.Curriculum ?? BrainConfig.Default.Curriculum;
         var evalCfg = config.Evaluation ?? BrainConfig.Default.Evaluation;
+        var memoryCfg = config.Memory ?? MemoryConfig.Default;
+        _longTermMemory.Configure(memoryCfg);
         var scenarioCfg = config.Scenarios ?? BrainConfig.Default.Scenarios;
         var rewardWeights = config.RewardWeights ?? BrainConfig.Default.RewardWeights ?? new RewardWeightsConfig(1.0, 1.0, 1.0, 0.05, 0.05);
         if (!string.IsNullOrWhiteSpace(_curriculumModeOverride))
@@ -539,6 +576,29 @@ public sealed class LifeLoop
             appraisal,
             config.Actions
         );
+
+        var memoryRecall = _longTermMemory.BuildActionBias(new MemoryCue(
+            _scenarioName,
+            _affect.Mood,
+            _homeo.Pain,
+            _homeo.Safety,
+            _homeo.Arousal
+        ));
+        ApplyLongTermMemoryBias(candidates, memoryRecall);
+        if (_tick % DiagnosticTicks == 0 && memoryRecall.RecallCount > 0)
+        {
+            var strongest = memoryRecall.ActionBiases
+                .OrderByDescending(pair => Math.Abs(pair.Value))
+                .FirstOrDefault();
+            EmitTrace("memory.recall", new
+            {
+                recalled = memoryRecall.RecallCount,
+                similarity = memoryRecall.BestSimilarity,
+                episodeId = memoryRecall.BestEpisodeId,
+                actionName = strongest.Key,
+                bias = strongest.Value
+            }, ct);
+        }
 
         var actionMask = _masker.BuildMask(_homeo, _affect, _cooldowns, _tick, emitCooldown, config.Actions, _loop.IsLoopDetected);
         candidates = candidates
@@ -834,6 +894,20 @@ public sealed class LifeLoop
         {
             var backend = mlTelemetry.BackendKind;
             var report = BuildEpisodeReport(resetReason, _scenarioName, backend);
+            var remembered = _longTermMemory.Remember(report);
+            if (remembered is not null)
+            {
+                _log($"ПАМЯТЬ: сохранён эпизод id={remembered.EpisodeId} " +
+                     $"сценарий={RussianDisplay.Token(remembered.ScenarioName)} " +
+                     $"награда={remembered.AvgReward:0.000} значимость={remembered.Salience:0.00}");
+                EmitTrace("memory.store", new
+                {
+                    episodeId = remembered.EpisodeId,
+                    scenario = remembered.ScenarioName,
+                    avgReward = remembered.AvgReward,
+                    salience = remembered.Salience
+                }, ct);
+            }
             if (evalCfg.SaveReports)
                 _reportWriter.Write(report);
             _policyEvaluator.Add(report, mlMode == "evaluation");
@@ -1057,6 +1131,42 @@ public sealed class LifeLoop
         }
 
         return message;
+    }
+
+    private static void ApplyLongTermMemoryBias(List<ActionSelector.Candidate> candidates, MemoryBiasResult recall)
+    {
+        if (recall.ActionBiases.Count == 0)
+            return;
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var candidate = candidates[i];
+            if (!recall.ActionBiases.TryGetValue(candidate.Action.Name, out var bias) || Math.Abs(bias) < 0.0005)
+                continue;
+
+            var reason = Math.Abs(bias) >= 0.005
+                ? $"{candidate.Reason}|long_term_memory"
+                : candidate.Reason;
+            candidates[i] = candidate with
+            {
+                Score = candidate.Score + bias,
+                Reason = reason
+            };
+        }
+    }
+
+    private static string FormatMemoryEntry(EpisodicMemoryEntry entry)
+    {
+        var topActions = entry.ActionHistogram
+            .OrderByDescending(pair => pair.Value)
+            .Take(3)
+            .Select(pair => $"{RussianDisplay.Token(pair.Key)}:{pair.Value}");
+        return $"эпизод={entry.EpisodeId} время={entry.EndTs:yyyy-MM-dd HH:mm:ss} " +
+               $"сценарий={RussianDisplay.Token(entry.ScenarioName)} " +
+               $"настроение={RussianDisplay.Token(entry.DominantMood)} " +
+               $"тиков={entry.Steps} награда={entry.AvgReward:0.000} " +
+               $"петли={entry.LoopCount} пройден={RussianDisplay.YesNo(entry.ScenarioPassed)} " +
+               $"действия=[{string.Join(", ", topActions)}]";
     }
 
     private static int ComputeEmitCooldownTicks(string voiceMode, double attachmentBaseline, bool isAnxious, ActionsConfig actions)

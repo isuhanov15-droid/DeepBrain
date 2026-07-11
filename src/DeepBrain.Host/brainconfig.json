@@ -138,6 +138,18 @@
     "windowEpisodes": 20,
     "saveReports": true
   },
+  "memory": {
+    "enable": true,
+    "path": "memory/episodes.jsonl",
+    "maxEpisodes": 5000,
+    "recallTopK": 8,
+    "minSimilarity": 0.45,
+    "maxActionBias": 0.15,
+    "recencyHalfLifeDays": 90,
+    "minEpisodesBeforeBias": 3,
+    "minEpisodeSteps": 25,
+    "rewardScale": 0.02
+  },
   "scenarios": {
     "calm_baseline": {
       "baselineThreat": 0.08,

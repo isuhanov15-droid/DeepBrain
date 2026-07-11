@@ -21,6 +21,7 @@ public static class RussianDisplay
             ["mask_fallback"] = "резервный выбор по маске",
             ["no_allowed_actions"] = "нет разрешённых действий",
             ["cooldown_fallback"] = "резервный выбор из-за задержки",
+            ["long_term_memory"] = "долговременная память",
 
             ["running"] = "работает",
             ["stopped"] = "остановлен",

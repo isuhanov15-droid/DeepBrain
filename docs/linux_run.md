@@ -38,6 +38,9 @@ dotnet run --project src/DeepBrain.Host/DeepBrain.Host.csproj -- \
 - `scenario.list`
 - `scenario.set <name>`
 - `curriculum.mode <mode>`
+- `memory.status`
+- `memory.recent [count]`
+- `memory.search <scenario|mood|action>`
 - `reloadconfig`
 
 Команды сохраняют технические английские имена ради совместимости, а ответы и справка выводятся на русском языке.
@@ -55,7 +58,7 @@ dotnet run --project src/DeepBrain.Studio/DeepBrain.Studio.csproj
 ## Особенности Linux
 
 - Пути формируются через `Path.Combine`.
-- Журналы, трассировки, отчёты и контрольные точки создаются относительно базового каталога приложения.
+- Журналы, трассировки, отчёты, контрольные точки и память создаются относительно рабочего каталога приложения.
 - Файлы записываются в UTF-8 без BOM.
 - TCP-транспорт и фрейминг не зависят от платформы.
 - Отрисовка консоли защищена от неинтерактивных терминалов и ошибок определения размера окна.

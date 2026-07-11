@@ -38,7 +38,36 @@ public sealed class ScenarioScorerTests
         Assert.False(score.Passed);
     }
 
-    private static EpisodeReport BuildReport(string scenario, int steps, int loopCount, Dictionary<string, int> moods, RewardDto reward)
+    [Fact]
+    public void MixedAdaptiveDiversityDoesNotCollapseInLongEpisode()
+    {
+        var scorer = new ScenarioScorer();
+        var report = BuildReport(
+            scenario: "mixed_adaptive",
+            steps: 1200,
+            loopCount: 0,
+            moods: new Dictionary<string, int> { ["calm"] = 600, ["curious"] = 600 },
+            reward: new RewardDto(0.01, 0.01, 0, 0, 0, 0.02),
+            actions: new Dictionary<string, int>
+            {
+                ["focus_widen"] = 500,
+                ["focus_narrow"] = 500,
+                ["rest_short"] = 200
+            }
+        );
+
+        var score = scorer.Score("mixed_adaptive", report);
+
+        Assert.True(score.Passed);
+    }
+
+    private static EpisodeReport BuildReport(
+        string scenario,
+        int steps,
+        int loopCount,
+        Dictionary<string, int> moods,
+        RewardDto reward,
+        Dictionary<string, int>? actions = null)
     {
         return new EpisodeReport(
             EpisodeId: 1,
@@ -50,7 +79,7 @@ public sealed class ScenarioScorerTests
             AvgReward: reward.Total,
             TotalReward: reward.Total * steps,
             RewardBreakdownAvg: reward,
-            ActionHistogram: new Dictionary<string, int> { ["rest_short"] = steps },
+            ActionHistogram: actions ?? new Dictionary<string, int> { ["rest_short"] = steps },
             LoopCount: loopCount,
             MaxLoopStrength: 0.1,
             MoodDistribution: moods,

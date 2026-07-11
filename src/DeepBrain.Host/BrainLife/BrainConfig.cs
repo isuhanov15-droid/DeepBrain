@@ -30,7 +30,8 @@ public sealed record BrainConfig(
     double SelfTalkRecoveryThreshold = 0.35,
     int SelfTalkLoopHoldTicks = 5,
     int SelfTalkRecoveryHoldTicks = 5,
-    int SelfTalkCalmWindowHoldTicks = 3)
+    int SelfTalkCalmWindowHoldTicks = 3,
+    MemoryConfig? Memory = null)
 {
     public static BrainConfig Default => new(
         new WorldConfig(
@@ -241,7 +242,8 @@ public sealed record BrainConfig(
         SelfTalkRecoveryThreshold: 0.35,
         SelfTalkLoopHoldTicks: 3,
         SelfTalkRecoveryHoldTicks: 3,
-        SelfTalkCalmWindowHoldTicks: 3
+        SelfTalkCalmWindowHoldTicks: 3,
+        Memory: MemoryConfig.Default
     );
 }
 
@@ -381,6 +383,32 @@ public sealed record EvaluationConfig(
     int WindowEpisodes,
     bool SaveReports
 );
+
+public sealed record MemoryConfig(
+    bool Enable,
+    string Path,
+    int MaxEpisodes,
+    int RecallTopK,
+    double MinSimilarity,
+    double MaxActionBias,
+    double RecencyHalfLifeDays,
+    int MinEpisodesBeforeBias,
+    int MinEpisodeSteps,
+    double RewardScale)
+{
+    public static MemoryConfig Default => new(
+        Enable: true,
+        Path: "memory/episodes.jsonl",
+        MaxEpisodes: 5000,
+        RecallTopK: 8,
+        MinSimilarity: 0.45,
+        MaxActionBias: 0.15,
+        RecencyHalfLifeDays: 90,
+        MinEpisodesBeforeBias: 3,
+        MinEpisodeSteps: 25,
+        RewardScale: 0.02
+    );
+}
 
 public sealed record ScenarioConfig(
     double BaselineThreat,

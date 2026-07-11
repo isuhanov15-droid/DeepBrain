@@ -104,7 +104,7 @@ lifeLoop = new LifeLoop(
 
 try
 {
-    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.0.2";
+    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.1.0";
     LogLine(consoleLock, logBuffer, logWriter, $"Запуск DeepBrain.Host v{hostVersion}...");
 
     await server.StartAsync(cts.Token);
@@ -229,7 +229,8 @@ static void RunCommandLoop(
         "Команды: trace (трассировка), stop/start (остановить/запустить), logs (журнал), " +
         "resetml (сброс ML), resetepisode или episode.reset (сброс эпизода), " +
         "mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, " +
-        "curriculum.mode, curriculum.next, reloadconfig, death, exit");
+        "curriculum.mode, curriculum.next, memory.status, memory.recent, memory.search, " +
+        "reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
         var line = Console.ReadLine();
@@ -341,6 +342,44 @@ static void RunCommandLoop(
                 LogLine(consoleLockProvider(), logBuffer, logWriter,
                     "Учебная программа перешла к следующему сценарию");
                 break;
+            case "memory.status":
+                if (lifeLoop is not null)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, lifeLoop.GetMemoryStatus());
+                break;
+            case "memory.recent":
+            {
+                var count = int.TryParse(arg, out var parsed) ? Math.Clamp(parsed, 1, 20) : 5;
+                var memories = lifeLoop?.GetRecentMemoryLines(count) ?? Array.Empty<string>();
+                if (memories.Count == 0)
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, "В долговременной памяти пока нет эпизодов");
+                    break;
+                }
+
+                foreach (var memory in memories)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"ВОСПОМИНАНИЕ: {memory}");
+                break;
+            }
+            case "memory.search":
+            {
+                if (string.IsNullOrWhiteSpace(arg))
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        "Для memory.search требуется сценарий, настроение, причина или имя действия");
+                    break;
+                }
+
+                var memories = lifeLoop?.SearchMemoryLines(arg, 10) ?? Array.Empty<string>();
+                if (memories.Count == 0)
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"Воспоминания не найдены: {arg}");
+                    break;
+                }
+
+                foreach (var memory in memories)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"ВОСПОМИНАНИЕ: {memory}");
+                break;
+            }
             case "reloadconfig":
                 configLoader.ReloadNow();
                 LogLine(consoleLockProvider(), logBuffer, logWriter, "Запрошена перезагрузка конфигурации");

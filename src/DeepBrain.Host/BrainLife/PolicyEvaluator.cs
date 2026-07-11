@@ -70,7 +70,7 @@ public sealed class PolicyEvaluator
                 moodCounts[kv.Key] = moodCounts.TryGetValue(kv.Key, out var count) ? count + kv.Value : kv.Value;
         }
 
-        var actionDiversity = totalSteps > 0 ? Math.Clamp(actionCounts.Count / (double)totalSteps, 0.0, 1.0) : 0.0;
+        var actionDiversity = ActionDiversity.Calculate(actionCounts);
         var calmCount = moodCounts.TryGetValue("calm", out var calm) ? calm : 0;
         var anxiousCount = moodCounts.TryGetValue("anxious", out var anx) ? anx : 0;
         var curiousCount = moodCounts.TryGetValue("curious", out var cur) ? cur : 0;
