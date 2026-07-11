@@ -19,6 +19,7 @@ public sealed class RewardEngineTests
             true,
             0.8,
             false,
+            false,
             new RewardConfig(1.0, 1.0, 1.0, 0.05, 0.35, 0.05, 0.01, 0.01));
 
         Assert.True(reward.LoopPenalty < 0);
@@ -36,8 +37,25 @@ public sealed class RewardEngineTests
             false,
             0.9,
             false,
+            false,
             new RewardConfig(1.0, 1.0, 1.0, 0.05, 0.35, 0.05, 0.01, 0.01));
 
         Assert.Equal(0.0, reward.LoopPenalty);
+    }
+
+    [Fact]
+    public void SocialRewardRequiresHandledContact()
+    {
+        var engine = new RewardEngine();
+        var before = new HomeostasisDto(0.5, 0.5, 0.2, 0.2, 0.7);
+        var after = before;
+        var appraisal = new AppraisalDto(0.1, 0.1, 0.9, 0.1);
+        var config = new RewardConfig(1.0, 1.0, 1.0, 0.05, 0.35, 0.05, 0.01, 0.01);
+
+        var emptySignal = engine.Compute(before, after, "emit_message", appraisal, false, 0, false, false, config);
+        var response = engine.Compute(before, after, "emit_message", appraisal, false, 0, false, true, config);
+
+        Assert.Equal(0.0, emptySignal.Social);
+        Assert.True(response.Social > 0);
     }
 }

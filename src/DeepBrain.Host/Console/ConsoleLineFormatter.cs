@@ -41,7 +41,8 @@ public static class ConsoleLineFormatter
                $"исслед={reward.Explore:+0.00;-0.00} " +
                $"соц={reward.Social:+0.00;-0.00} " +
                $"петля={reward.LoopPenalty:+0.00;-0.00} " +
-               $"недоп={reward.InvalidActionPenalty:+0.00;-0.00}";
+               $"недоп={reward.InvalidActionPenalty:+0.00;-0.00} " +
+               $"терминал={reward.TerminalPenalty:+0.00;-0.00}";
     }
 
     public static string FormatEpisodeLine(LifeStateDto? state)

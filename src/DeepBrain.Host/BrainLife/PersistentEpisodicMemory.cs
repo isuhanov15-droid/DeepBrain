@@ -218,7 +218,7 @@ public sealed class PersistentEpisodicMemory
 
                 var outcome = Math.Tanh(match.Entry.AvgReward / rewardScale);
                 if (!match.Entry.ScenarioPassed)
-                    outcome -= 0.20;
+                    outcome = -Math.Max(0.25, Math.Abs(outcome));
                 if (match.Entry.LoopCount > 0)
                     outcome -= Math.Min(0.40, match.Entry.LoopCount * 0.10);
                 outcome = Math.Clamp(outcome, -1.0, 1.0);

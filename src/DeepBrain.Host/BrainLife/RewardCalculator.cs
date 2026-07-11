@@ -20,8 +20,9 @@ public sealed class RewardCalculator
         bool isInLoop,
         double loopStrength,
         bool invalidAction,
+        bool socialContactHandled,
         RewardConfig config)
     {
-        return _engine.Compute(before, after, actionName, appraisal, isInLoop, loopStrength, invalidAction, config);
+        return _engine.Compute(before, after, actionName, appraisal, isInLoop, loopStrength, invalidAction, socialContactHandled, config);
     }
 }

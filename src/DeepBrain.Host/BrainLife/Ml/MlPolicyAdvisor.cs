@@ -26,14 +26,20 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
     private int _invalidActionFallbackCount;
     private double _epsilon = -1;
     private string _backendKind = "stub";
+    private long _restoredTrainSteps;
     private DateTime _lastBackendLog = DateTime.MinValue;
     private string? _lastBackendLogMsg;
 
     public MlPolicyAdvisor(MlConfig config, Action<string> log)
+        : this(config, log, MlBackendFactory.Create(config, log))
+    {
+    }
+
+    public MlPolicyAdvisor(MlConfig config, Action<string> log, IBrainMlBackend backend)
     {
         _log = log;
         _rng = new Random(config.Seed);
-        _backend = MlBackendFactory.Create(config, log);
+        _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _backendKind = _backend.Kind;
     }
 
@@ -52,6 +58,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         _illegalChoiceCount = 0;
         _overrideCount = 0;
         _invalidActionFallbackCount = 0;
+        _restoredTrainSteps = 0;
         _epsilon = config.EpsilonStart;
         _lossWindow.Clear();
         _overrideWindow.Clear();
@@ -101,8 +108,9 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
             MlMath.ApplyMask(probs, mask);
 
         _entropy = MlMath.ComputeEntropy(probs);
-        var netWeight = ComputeNetWeight(config, _backend.BufferSize, _backend.TrainSteps);
-        var epsilon = ComputeEpsilon(config, _backend.BufferSize, _backend.TrainSteps);
+        var effectiveTrainSteps = EffectiveTrainSteps();
+        var netWeight = ComputeNetWeight(config, _backend.BufferSize, effectiveTrainSteps);
+        var epsilon = ComputeEpsilon(config, _backend.BufferSize, effectiveTrainSteps);
 
         var finalScores = BlendScores(heuristicScores, probs.Select(p => (float)p).ToArray(), netWeight);
         var actionName = ChooseAction(finalScores, allowedActions, epsilon, _rng);
@@ -153,7 +161,10 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         }
 
         if (result.Trained)
+        {
             PushLoss(result.Loss);
+            _restoredTrainSteps = Math.Max(_restoredTrainSteps, result.TrainSteps);
+        }
     }
 
     public bool TryLoad(string path, out int episodeId)
@@ -172,15 +183,20 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
                 {
                     episodeId = meta.EpisodeId;
                     _epsilon = meta.Epsilon;
+                    _restoredTrainSteps = Math.Max(0, meta.TrainSteps);
                     return true;
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _log($"Предупреждение: метаданные ML checkpoint повреждены: {ex.Message}");
         }
 
-        return _backend.TryLoad(path, out episodeId);
+        var loaded = _backend.TryLoad(path, out episodeId);
+        if (loaded)
+            _restoredTrainSteps = Math.Max(_restoredTrainSteps, _backend.TrainSteps);
+        return loaded;
     }
 
     public void TrySave(string path, int episodeId)
@@ -189,9 +205,9 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(dir))
             Directory.CreateDirectory(dir);
-        var weightsPath = path + ".net";
-        _backend.TrySave(weightsPath, episodeId);
-        var meta = new MlCheckpointMeta(episodeId, _epsilon, _backend.TrainSteps, weightsPath);
+        var backendPath = _backend.Kind == "remote" ? path : path + ".net";
+        _backend.TrySave(backendPath, episodeId);
+        var meta = new MlCheckpointMeta(episodeId, _epsilon, EffectiveTrainSteps(), backendPath);
         var json = JsonSerializer.Serialize(meta);
         File.WriteAllText(path, json);
     }
@@ -214,7 +230,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
                 AvgReward200: avgReward200,
                 AvgQ: _avgQ,
                 Entropy: 0,
-                TrainSteps: _backend.TrainSteps,
+                TrainSteps: EffectiveTrainSteps(),
                 NanSkips: _nanSkips,
                 IllegalChoiceCount: _illegalChoiceCount,
                 OverrideCount: _overrideCount,
@@ -246,7 +262,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
             AvgReward200: avgReward200,
             AvgQ: _avgQ,
             Entropy: _entropy,
-            TrainSteps: _backend.TrainSteps,
+            TrainSteps: EffectiveTrainSteps(),
             NanSkips: _nanSkips,
             IllegalChoiceCount: _illegalChoiceCount,
             OverrideCount: _overrideCount,
@@ -282,6 +298,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         var old = _backend;
         _backend = MlBackendFactory.Create(config, _log);
         _backendKind = _backend.Kind;
+        _restoredTrainSteps = 0;
         _ = old.DisposeAsync();
         if (config.LogBackendSwitches)
             RateLimitedBackendLog($"ML backend переключён на {_backendKind}");
@@ -303,6 +320,11 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         var w = MlPolicySchedule.ComputeNetWeight(config, bufferSize, trainSteps);
         _lastNetWeight = w;
         return w;
+    }
+
+    private long EffectiveTrainSteps()
+    {
+        return Math.Max(_restoredTrainSteps, _backend.TrainSteps);
     }
 
     private double ComputeEpsilon(MlConfig config, int bufferSize, long trainSteps)

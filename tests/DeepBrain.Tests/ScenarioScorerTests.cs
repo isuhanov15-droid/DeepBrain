@@ -61,6 +61,27 @@ public sealed class ScenarioScorerTests
         Assert.True(score.Passed);
     }
 
+    [Fact]
+    public void PanicReasonTakesPriorityOverScenarioSpecificFailure()
+    {
+        var scorer = new ScenarioScorer();
+        var report = BuildReport(
+            scenario: "social_pull",
+            steps: 5,
+            loopCount: 0,
+            moods: new Dictionary<string, int> { ["calm"] = 5 },
+            reward: new RewardDto(0, 0, 0, 0, 0, -0.5)) with
+        {
+            EndReason = "panic",
+            AvgSafety = 0.02
+        };
+
+        var score = scorer.Score("social_pull", report);
+
+        Assert.False(score.Passed);
+        Assert.StartsWith("panic", score.Reason);
+    }
+
     private static EpisodeReport BuildReport(
         string scenario,
         int steps,

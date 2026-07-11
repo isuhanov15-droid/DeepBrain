@@ -491,11 +491,12 @@ public sealed class LifeLoop
         foreach (var ev in newEvents)
             _eventCounts[ev.Type] = _eventCounts.TryGetValue(ev.Type, out var count) ? count + 1 : 1;
         var recentEvents = _world.Events.GetRecent(5);
+        var hasPendingSocialSignal = SocialContactResponder.HasPending(_world.Events);
         if (_tick % 50 == 0)
             EmitTrace("world.climate", new { calm = _world.CalmLevel, stress = _world.StressLevel, tension = _world.Tension, baseline = _world.BaselineTension, lastMajor = _world.LastMajorEvent }, ct);
 
         _homeo = _homeostasis.Update(_homeo, _world, dtSeconds);
-        var painSource = ApplyPainSafetyAdjustments(ref _homeo, circ, recentEvents, dtSeconds, config.Pain);
+        var painSource = ApplyPainSafetyAdjustments(ref _homeo, circ, recentEvents, newEvents, dtSeconds, config.Pain);
         var instincts = _instincts.Compute(_homeo, _world, config.Drives);
         instincts = instincts with
         {
@@ -574,7 +575,8 @@ public sealed class LifeLoop
             _semantic,
             semanticKey,
             appraisal,
-            config.Actions
+            config.Actions,
+            hasPendingSocialSignal
         );
 
         var memoryRecall = _longTermMemory.BuildActionBias(new MemoryCue(
@@ -600,7 +602,15 @@ public sealed class LifeLoop
             }, ct);
         }
 
-        var actionMask = _masker.BuildMask(_homeo, _affect, _cooldowns, _tick, emitCooldown, config.Actions, _loop.IsLoopDetected);
+        var actionMask = _masker.BuildMask(
+            _homeo,
+            _affect,
+            _cooldowns,
+            _tick,
+            emitCooldown,
+            config.Actions,
+            _loop.IsLoopDetected,
+            episodeConfig.PanicSafetyMin);
         candidates = candidates
             .Where(c => IsMaskAllowed(actionMask, c.Action.Name))
             .ToList();
@@ -667,16 +677,33 @@ public sealed class LifeLoop
         if (action.Name == "explore_signal")
             _world.DampenNovelty(action.Strength);
 
-        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, false, 0.0, invalidAction, rewardConfig);
+        var socialSignalsHandled = action.Name == "emit_message"
+            ? SocialContactResponder.ConsumePending(_world.Events)
+            : 0;
+        var socialContactHandled = socialSignalsHandled > 0;
+        if (socialContactHandled)
+            EmitTrace("social.response", new { consumed = socialSignalsHandled, tick = _tick }, ct);
+
+        var rewardBase = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, false, 0.0, invalidAction, socialContactHandled, rewardConfig);
         var regBonus = ComputeRegulationBonus(action, beforeHomeo, _homeo, beforeAffect, _affect);
         rewardBase = ApplyHomeostasisBonus(rewardBase, regBonus);
         _loop.Update(action.Name, _affect.Mood, _affect.Arousal, _homeo.Energy, _homeo.Fatigue, dominantDrive, circ.Phase, attention.Focus1, rewardBase.Total, _tick);
-        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.IsInLoop, _loop.LoopStrength, invalidAction, rewardConfig);
+        var rewardDto = _rewardCalc.Compute(beforeHomeo, _homeo, action.Name, appraisal, _loop.IsInLoop, _loop.LoopStrength, invalidAction, socialContactHandled, rewardConfig);
         rewardDto = ApplyHomeostasisBonus(rewardDto, regBonus);
+
+        var isPanic = _episode.IsPanic(_homeo.Safety, _homeo.Pain, _world.Threat);
+        var pendingEpisodeReset = _episode.Tick(_loop.LoopStrength, _loop.IsLoopDetected, isPanic, out var episodeResetReason);
+        var resetReason = pendingEpisodeReset && !string.IsNullOrWhiteSpace(episodeResetReason)
+            ? episodeResetReason!
+            : "none";
+
+        if (resetReason == "panic")
+            rewardDto = PanicRecovery.ApplyTerminalPenalty(rewardDto, episodeConfig);
+
         _learning.Update(action.Name, rewardDto.Total);
         _cooldowns.Mark(action.Name, _tick);
         UpdateStats(action.Name, _affect.Mood, _homeo, attention, rewardDto.Total);
-        UpdateEpisodeMetrics(action, _affect.Mood, rewardDto, _loop.IsLoopDetected, _loop.LoopStrength, _homeo, maskFallback, invalidAction, decision.UsedMl, decision.Epsilon);
+        UpdateEpisodeMetrics(action, _affect.Mood, rewardDto, _loop.IsLoopDetected, _loop.LoopStrength, _homeo, socialContactHandled, maskFallback, invalidAction, decision.UsedMl, decision.Epsilon);
 
         if (_loop.IsLoopDetected && _loop.ShouldAnnounceLoop(_tick))
         {
@@ -685,16 +712,11 @@ public sealed class LifeLoop
                  $"тик={_tick} сила={_loop.LoopStrength:0.00}");
         }
 
-        var isPanic = _episode.IsPanic(_homeo.Safety, _homeo.Pain, _world.Threat);
-        var pendingEpisodeReset = _episode.Tick(_loop.LoopStrength, _loop.IsLoopDetected, isPanic, out var episodeResetReason);
-        var resetReason = pendingEpisodeReset && !string.IsNullOrWhiteSpace(episodeResetReason)
-            ? episodeResetReason!
-            : "none";
-
         if (trainEnabled && stateVec.Length > 0)
         {
             var nextInstincts = _instincts.Compute(_homeo, _world, config.Drives);
-            var nextAppraisal = _appraisal.Compute(_homeo, nextInstincts, _world, circ, recentEvents);
+            var nextRecentEvents = _world.Events.GetRecent(5);
+            var nextAppraisal = _appraisal.Compute(_homeo, nextInstincts, _world, circ, nextRecentEvents);
             var nextVec = _ml.Encode(new StateVectorInput(
                 _homeo,
                 nextInstincts,
@@ -707,11 +729,19 @@ public sealed class LifeLoop
                 _loop.AvgRewardShort,
                 _personality.Persona,
                 habitInfluence,
-                recentEvents.FirstOrDefault()?.Salience ?? 0,
+                nextRecentEvents.FirstOrDefault()?.Salience ?? 0,
                 nextAppraisal
             ));
             var actionIdx = ActionCatalog.IndexOf(action.Name);
-            var nextMask = _masker.BuildMask(_homeo, _affect, _cooldowns, _tick + 1, emitCooldown, config.Actions, _loop.IsLoopDetected);
+            var nextMask = _masker.BuildMask(
+                _homeo,
+                _affect,
+                _cooldowns,
+                _tick + 1,
+                emitCooldown,
+                config.Actions,
+                _loop.IsLoopDetected,
+                episodeConfig.PanicSafetyMin);
             var done = resetReason != "none";
             _ml.Observe(stateVec, actionIdx, (float)rewardDto.Total, nextVec, done, nextMask, mlConfigEffective, _tick);
         }
@@ -760,8 +790,7 @@ public sealed class LifeLoop
 
         if (action.Name == "emit_message")
         {
-            var count = _world.Events.Consume(e => e.Type == "social_ping" && e.Salience > 0.3);
-            if (count > 0)
+            if (socialContactHandled)
                 _log($"ОБРАБОТАНО СОБЫТИЕ сигнал контакта, тик={_tick}");
         }
         else if (action.Name == "explore_signal")
@@ -919,7 +948,7 @@ public sealed class LifeLoop
             if (_curriculum.Advance(gateReward))
                 _log($"СЛЕДУЮЩИЙ СЦЕНАРИЙ название={RussianDisplay.Token(_curriculum.ScenarioName)} " +
                      $"индекс={_curriculum.ScenarioIndex} режим={RussianDisplay.Token(_curriculum.Mode)}");
-            ResetEpisode(resetReason);
+            ResetEpisode(resetReason, episodeConfig);
             _log($"СБРОС ЭПИЗОДА причина={RussianDisplay.Token(resetReason)} id={_episode.EpisodeId}");
             EmitTrace("episode.reset",
                 $"эпизод={_episode.EpisodeId} причина={RussianDisplay.Token(resetReason)}", ct);
@@ -1051,7 +1080,10 @@ public sealed class LifeLoop
     {
         if (Math.Abs(bonus) < 1e-9) return reward;
         var homeo = reward.Homeostasis + bonus;
-        var total = Math.Clamp(homeo + reward.Explore + reward.Social + reward.LoopPenalty + reward.InvalidActionPenalty, -1.0, 1.0);
+        var total = Math.Clamp(
+            homeo + reward.Explore + reward.Social + reward.LoopPenalty + reward.InvalidActionPenalty + reward.TerminalPenalty,
+            -1.0,
+            1.0);
         return reward with { Homeostasis = homeo, Total = total };
     }
 
@@ -1072,6 +1104,7 @@ public sealed class LifeLoop
         ref HomeostasisDto homeo,
         DeepBrain.Shared.BrainDtos.V3.CircadianDto circ,
         IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> eventsList,
+        IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> currentTickEvents,
         double dtSeconds,
         PainConfig config)
     {
@@ -1092,11 +1125,7 @@ public sealed class LifeLoop
         if (homeo.Safety > 0.8)
             pain -= config.SafetyBonusPerSec * dtSeconds;
 
-        var safety = homeo.Safety;
-        if (calmEvent)
-            safety += 0.03 * dtSeconds;
-        if (threatEvents.Count > 0)
-            safety -= 0.05 * dtSeconds;
+        var safety = SafetyEventIntegrator.Apply(homeo.Safety, currentTickEvents, dtSeconds);
 
         homeo = homeo with
         {
@@ -1192,8 +1221,16 @@ public sealed class LifeLoop
         _episodes.Add(episode);
     }
 
-    private void ResetEpisode(string reason)
+    private void ResetEpisode(string reason, EpisodeConfig episodeConfig)
     {
+        if (reason == "panic")
+        {
+            var before = _homeo;
+            _homeo = PanicRecovery.Restore(_homeo, episodeConfig);
+            _log($"ВОССТАНОВЛЕНИЕ ПОСЛЕ ПАНИКИ: безопасность={before.Safety:0.00}→{_homeo.Safety:0.00} " +
+                 $"боль={before.Pain:0.00}→{_homeo.Pain:0.00}");
+        }
+
         _episode.Reset(reason);
         _cooldowns.ResetAll();
         _loop.ResetShortTerm();
@@ -1250,7 +1287,7 @@ public sealed class LifeLoop
         _statsSnapshot = BuildStatsSnapshot();
     }
 
-    private void UpdateEpisodeMetrics(ActionDto action, string mood, RewardDto reward, bool loopDetected, double loopStrength, HomeostasisDto homeo, bool maskFallback, bool invalidAction, bool usedMl, double epsilon)
+    private void UpdateEpisodeMetrics(ActionDto action, string mood, RewardDto reward, bool loopDetected, double loopStrength, HomeostasisDto homeo, bool socialContactHandled, bool maskFallback, bool invalidAction, bool usedMl, double epsilon)
     {
         _episodeSteps++;
         _episodeRewardSum += reward.Total;
@@ -1261,7 +1298,10 @@ public sealed class LifeLoop
             _episodeRewardBreakdown.LoopPenalty + reward.LoopPenalty,
             _episodeRewardBreakdown.InvalidActionPenalty + reward.InvalidActionPenalty,
             _episodeRewardBreakdown.Total + reward.Total
-        );
+        )
+        {
+            TerminalPenalty = _episodeRewardBreakdown.TerminalPenalty + reward.TerminalPenalty
+        };
 
         _episodeActionCounts[action.Name] = _episodeActionCounts.TryGetValue(action.Name, out var count) ? count + 1 : 1;
         _episodeMoodCounts[mood] = _episodeMoodCounts.TryGetValue(mood, out var mcount) ? mcount + 1 : 1;
@@ -1280,7 +1320,7 @@ public sealed class LifeLoop
         _episodeSumSafety += homeo.Safety;
         _episodeSumArousal += homeo.Arousal;
 
-        if (action.Name == "emit_message")
+        if (action.Name == "emit_message" && socialContactHandled)
             _episodeSocialSignals++;
         if (maskFallback)
             _episodeMaskFallbackCount++;
@@ -1323,7 +1363,10 @@ public sealed class LifeLoop
             _episodeRewardBreakdown.LoopPenalty / steps,
             _episodeRewardBreakdown.InvalidActionPenalty / steps,
             _episodeRewardBreakdown.Total / steps
-        );
+        )
+        {
+            TerminalPenalty = _episodeRewardBreakdown.TerminalPenalty / steps
+        };
 
         var report = new EpisodeReport(
             EpisodeId: _episode.EpisodeId,
@@ -1386,7 +1429,8 @@ public sealed class LifeLoop
                $"исслед={FormatSigned(reward.Explore)} " +
                $"соц={FormatSigned(reward.Social)} " +
                $"петля={FormatSigned(reward.LoopPenalty)} " +
-               $"недоп={FormatSigned(reward.InvalidActionPenalty)}";
+               $"недоп={FormatSigned(reward.InvalidActionPenalty)} " +
+               $"терминал={FormatSigned(reward.TerminalPenalty)}";
     }
 
     private static string NormalizeDecisionReason(string reason, bool maskFallback)

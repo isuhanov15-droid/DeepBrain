@@ -131,6 +131,31 @@ public sealed class PersistentEpisodicMemoryTests
     }
 
     [Fact]
+    public void PositiveRewardCannotReinforceFailedScenarioActions()
+    {
+        var dir = CreateTempDirectory();
+        try
+        {
+            var memory = new PersistentEpisodicMemory(_ => { });
+            memory.Configure(BuildConfig(Path.Combine(dir, "episodes.jsonl"), 1, 1));
+            memory.Remember(BuildReport(
+                episodeId: 14,
+                scenario: "social_pull",
+                avgReward: 0.02,
+                actions: new Dictionary<string, int> { ["focus_widen"] = 100 },
+                passed: false));
+
+            var result = memory.BuildActionBias(new MemoryCue("social_pull", "calm", 0.2, 0.7, 0.3));
+
+            Assert.True(result.ActionBiases["focus_widen"] < 0);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SkipsMalformedLinesAndEpisodesThatAreTooShort()
     {
         var dir = CreateTempDirectory();

@@ -140,7 +140,8 @@ public partial class MainWindow : Window
                                            $"исследование:{state.Reward.Explore:+0.000;-0.000} " +
                                            $"социальная:{state.Reward.Social:+0.000;-0.000} " +
                                            $"петля:{state.Reward.LoopPenalty:+0.000;-0.000} " +
-                                           $"недопустимое:{state.Reward.InvalidActionPenalty:+0.000;-0.000}";
+                                           $"недопустимое:{state.Reward.InvalidActionPenalty:+0.000;-0.000} " +
+                                           $"терминал:{state.Reward.TerminalPenalty:+0.000;-0.000}";
         }
         else
         {

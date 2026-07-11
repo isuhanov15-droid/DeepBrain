@@ -30,7 +30,8 @@ public sealed class ActionSelector
         SemanticMemory semantic,
         string semanticKey,
         AppraisalDto appraisal,
-        ActionsConfig actionsConfig)
+        ActionsConfig actionsConfig,
+        bool hasPendingSocialSignal = false)
     {
         var (candidates, strategy) = BuildCandidates(
             homeo,
@@ -53,7 +54,8 @@ public sealed class ActionSelector
             semantic,
             semanticKey,
             appraisal,
-            actionsConfig
+            actionsConfig,
+            hasPendingSocialSignal
         );
 
         if (candidates.Count == 0)
@@ -84,7 +86,8 @@ public sealed class ActionSelector
         SemanticMemory semantic,
         string semanticKey,
         AppraisalDto appraisal,
-        ActionsConfig actionsConfig)
+        ActionsConfig actionsConfig,
+        bool hasPendingSocialSignal = false)
     {
         var list = new List<Candidate>();
 
@@ -105,8 +108,14 @@ public sealed class ActionSelector
             list.Add(Make("internal", "focus_widen", instincts.Exploration * 0.8, "exploration", learning));
         }
 
-        if (IsAllowed(strategy, "connect") || instincts.Attachment >= 0.6)
-            list.Add(Make("external", "emit_message", instincts.Attachment, "attachment", learning));
+        if (hasPendingSocialSignal || IsAllowed(strategy, "connect") || instincts.Attachment >= 0.6)
+        {
+            var strength = hasPendingSocialSignal
+                ? Math.Max(0.75, instincts.Attachment)
+                : instincts.Attachment;
+            var reason = hasPendingSocialSignal ? "social_signal" : "attachment";
+            list.Add(Make("external", "emit_message", strength, reason, learning));
+        }
 
         if (IsAllowed(strategy, "focus"))
         {
@@ -122,6 +131,12 @@ public sealed class ActionSelector
 
         if (loop.IsLoopDetected)
             list.Add(Make("internal", "loop_break", 0.6 + loop.LoopPenalty, "loop_break", learning));
+
+        if (homeo.Safety <= 0.25 && list.All(c => c.Action.Name != "breathe_slow"))
+        {
+            var recoveryStrength = Math.Max(instincts.SelfPreservation, 1.0 - homeo.Safety);
+            list.Add(Make("internal", "breathe_slow", recoveryStrength, "safety_recovery", learning));
+        }
 
         // Focus actions are neutral and keep the policy executable while a
         // strategy-specific action (for example rest_short) is on cooldown.
@@ -140,7 +155,7 @@ public sealed class ActionSelector
         ApplyAppraisalBias(list, appraisal);
         ApplyHabitBias(list, habitAction, habitStrength, habitInfluence, cooldowns, tick, emitCooldownTicks);
         ApplyVarietyBonus(list, cooldowns, tick, allowVariety);
-        ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks, actionsConfig);
+        ApplyCooldowns(list, cooldowns, tick, emitCooldownTicks, actionsConfig, homeo.Safety <= 0.25);
         return (list, strategy);
     }
 
@@ -340,9 +355,18 @@ public sealed class ActionSelector
         }
     }
 
-    private static void ApplyCooldowns(List<Candidate> list, ActionCooldowns cooldowns, long tick, int emitCooldownTicks, ActionsConfig actions)
+    private static void ApplyCooldowns(
+        List<Candidate> list,
+        ActionCooldowns cooldowns,
+        long tick,
+        int emitCooldownTicks,
+        ActionsConfig actions,
+        bool forceSafetyRecovery)
     {
-        var filtered = list.Where(c => !IsOnCooldown(cooldowns, c.Action.Name, tick, emitCooldownTicks, actions)).ToList();
+        var filtered = list
+            .Where(c => (forceSafetyRecovery && c.Action.Name == "breathe_slow")
+                || !IsOnCooldown(cooldowns, c.Action.Name, tick, emitCooldownTicks, actions))
+            .ToList();
         list.Clear();
         list.AddRange(filtered);
     }

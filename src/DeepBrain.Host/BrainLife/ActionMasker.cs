@@ -12,14 +12,27 @@ public sealed class ActionMasker
         long tick,
         int emitCooldownTicks,
         ActionsConfig actions,
-        bool allowLoopBreak)
+        bool allowLoopBreak,
+        double criticalSafetyThreshold = 0.10)
     {
         var mask = new float[ActionCatalog.Count];
         for (var i = 0; i < mask.Length; i++)
             mask[i] = 1f;
 
+        // Safety is a hard constraint. While it is at the panic threshold the
+        // policy must be able to execute the one catalogued action that raises
+        // Safety, regardless of arousal or cooldown state.
+        if (homeo.Safety <= Math.Clamp(criticalSafetyThreshold, 0.0, 1.0))
+        {
+            Array.Fill(mask, 0f);
+            var recoveryIndex = ActionCatalog.IndexOf("breathe_slow");
+            if (recoveryIndex >= 0)
+                mask[recoveryIndex] = 1f;
+            return mask;
+        }
+
         DisableIf(mask, "rest_short", homeo.Energy > 0.98 && homeo.Fatigue < 0.15);
-        DisableIf(mask, "breathe_slow", affect.Arousal < 0.15);
+        DisableIf(mask, "breathe_slow", affect.Arousal < 0.15 && homeo.Safety > 0.25);
         DisableIf(mask, "reframe_negative", affect.Valence > 0.20);
         DisableIf(mask, "explore_signal", homeo.Safety < 0.25);
         DisableIf(mask, "focus_narrow", affect.Arousal > 0.95);

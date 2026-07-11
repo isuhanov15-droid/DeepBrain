@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Text.Json;
 using DeepBrain.Shared.MlBridge;
 
 namespace DeepBrain.Host.BrainLife.Ml;
@@ -13,6 +14,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
     private double _lastLoss;
     private long _trainSteps;
     private int _bufferSize;
+    private string? _checkpointError;
 
     public RemoteHostBackend(MlConfig config, Action<string> log)
     {
@@ -23,7 +25,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
     public bool IsAvailable => true;
     public string Kind => "remote";
     public bool IsConnected => _client.IsConnected;
-    public string? LastError => _client.LastError;
+    public string? LastError => _checkpointError ?? _client.LastError;
     public double LastRttMs => _client.LastRttMs;
     public int InputDim => StateVectorizer.InputDim;
     public int ActionCount => ActionCatalog.Count;
@@ -103,13 +105,52 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         episodeId = 0;
         var req = new MlCheckpointRequest(path);
         var resp = _client.CallAsync<MlCheckpointRequest, MlCheckpointResponse>("ml.checkpoint.load", req, CancellationToken.None).GetAwaiter().GetResult();
-        return resp != null && resp.Ok;
+        if (resp is null)
+        {
+            _checkpointError = _client.LastError ?? "checkpoint load: no response";
+            _log($"Предупреждение: ML checkpoint не загружен: {_checkpointError}");
+            return false;
+        }
+
+        if (!resp.Ok)
+        {
+            _checkpointError = string.IsNullOrWhiteSpace(resp.Meta) ? "load failed" : resp.Meta;
+            _log($"Предупреждение: ML checkpoint не загружен: {_checkpointError}");
+            return false;
+        }
+
+        _checkpointError = null;
+        if (!string.IsNullOrWhiteSpace(resp.Meta))
+        {
+            try
+            {
+                var meta = JsonSerializer.Deserialize<RemoteCheckpointMeta>(
+                    resp.Meta,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (meta is not null)
+                    _trainSteps = Math.Max(_trainSteps, meta.TrainSteps);
+            }
+            catch (JsonException ex)
+            {
+                _log($"Предупреждение: ответ ML checkpoint не содержит корректные метаданные: {ex.Message}");
+            }
+        }
+
+        return true;
     }
 
     public void TrySave(string path, int episodeId)
     {
         var req = new MlCheckpointRequest(path);
-        _ = _client.CallAsync<MlCheckpointRequest, MlCheckpointResponse>("ml.checkpoint.save", req, CancellationToken.None).GetAwaiter().GetResult();
+        var resp = _client.CallAsync<MlCheckpointRequest, MlCheckpointResponse>("ml.checkpoint.save", req, CancellationToken.None).GetAwaiter().GetResult();
+        if (resp is null || !resp.Ok)
+        {
+            _checkpointError = resp?.Meta ?? _client.LastError ?? "checkpoint save: no response";
+            _log($"Предупреждение: ML checkpoint не сохранён: {_checkpointError}");
+            return;
+        }
+
+        _checkpointError = null;
     }
 
     public void Reset(MlConfig config)
@@ -119,6 +160,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         _avgQ = 0;
         _trainSteps = 0;
         _bufferSize = 0;
+        _checkpointError = null;
         BufferCapacity = Math.Max(1024, config.BufferSize);
         _client.UpdateConfig(config.Remote);
     }
@@ -149,6 +191,8 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         if (_lossWindow.Count == 0) return 0;
         return _lossWindow.Average();
     }
+
+    private sealed record RemoteCheckpointMeta(long TrainSteps, string? WeightsPath);
 
     private void RateLimitedLog(string message)
     {

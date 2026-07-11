@@ -28,17 +28,17 @@ public sealed class AttentionEngine
             intensity = LifeMath.Clamp01(0.5 + threatIntensity * 0.5);
             reason = "self_preservation/threat_event";
         }
+        else if (HasEvent(recentEvents, "social_ping", 0.3))
+        {
+            focus1 = "social";
+            intensity = 0.75;
+            reason = "social_ping";
+        }
         else if (instincts.Exploration > 0.6 && (HasEvent(recentEvents, "calm_window") || HasEvent(recentEvents, "novelty_opportunity")))
         {
             focus1 = "novelty";
             intensity = 0.7;
             reason = "exploration/calm_window";
-        }
-        else if (instincts.Attachment > 0.6 && HasEvent(recentEvents, "social_ping"))
-        {
-            focus1 = "social";
-            intensity = 0.7;
-            reason = "attachment/social_ping";
         }
         else if (homeo.Fatigue > 0.6 || circadian.SleepPressure > 0.6)
         {
@@ -66,8 +66,8 @@ public sealed class AttentionEngine
         return new AttentionDto(focus1, focus2, intensity, reason, focus1, threatIntensity);
     }
 
-    private static bool HasEvent(IReadOnlyList<WorldEventDto> eventsList, string type)
+    private static bool HasEvent(IReadOnlyList<WorldEventDto> eventsList, string type, double minimumSalience = 0.2)
     {
-        return eventsList.Any(e => e.Type == type && e.Salience > 0.2);
+        return eventsList.Any(e => e.Type == type && e.Salience > minimumSalience);
     }
 }

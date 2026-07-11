@@ -11,6 +11,8 @@ public sealed class EpisodeManager
     private double _panicSafetyMin;
     private double _panicPainMin;
     private double _panicThreatMin;
+    private int _panicHoldTicks;
+    private int _panicHoldCount;
     private string _lastResetReason = "none";
     private string? _requestedResetReason;
 
@@ -27,6 +29,7 @@ public sealed class EpisodeManager
         _panicSafetyMin = 0.10;
         _panicPainMin = 0.95;
         _panicThreatMin = 0.90;
+        _panicHoldTicks = 5;
     }
 
     public void Configure(EpisodeConfig config)
@@ -37,6 +40,7 @@ public sealed class EpisodeManager
         _panicSafetyMin = Math.Clamp(config.PanicSafetyMin, 0.0, 1.0);
         _panicPainMin = Math.Clamp(config.PanicPainMin, 0.0, 1.0);
         _panicThreatMin = Math.Clamp(config.PanicThreatMin, 0.0, 1.0);
+        _panicHoldTicks = Math.Max(1, config.PanicHoldTicks);
     }
 
     public void Configure(EpisodeConfig config, double lengthMultiplier)
@@ -48,6 +52,7 @@ public sealed class EpisodeManager
         _panicSafetyMin = Math.Clamp(config.PanicSafetyMin, 0.0, 1.0);
         _panicPainMin = Math.Clamp(config.PanicPainMin, 0.0, 1.0);
         _panicThreatMin = Math.Clamp(config.PanicThreatMin, 0.0, 1.0);
+        _panicHoldTicks = Math.Max(1, config.PanicHoldTicks);
     }
 
     public void RequestManualReset()
@@ -88,10 +93,18 @@ public sealed class EpisodeManager
             return true;
         }
 
-        if (isPanic && (loopStrength <= _loopStrengthThreshold))
+        if (isPanic && loopStrength <= _loopStrengthThreshold)
         {
-            reason = "panic";
-            return true;
+            _panicHoldCount++;
+            if (_panicHoldCount >= _panicHoldTicks)
+            {
+                reason = "panic";
+                return true;
+            }
+        }
+        else
+        {
+            _panicHoldCount = 0;
         }
 
         if (isLoop && loopStrength >= _loopStrengthThreshold)
@@ -116,6 +129,7 @@ public sealed class EpisodeManager
         _episodeId++;
         _episodeTick = 0;
         _loopHoldCount = 0;
+        _panicHoldCount = 0;
         _lastResetReason = reason;
     }
 

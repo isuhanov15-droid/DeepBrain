@@ -9,4 +9,8 @@ public sealed record RewardDto(
     [property: JsonPropertyName("loopPenalty")] double LoopPenalty,
     [property: JsonPropertyName("invalidActionPenalty")] double InvalidActionPenalty,
     [property: JsonPropertyName("total")] double Total
-);
+)
+{
+    [JsonPropertyName("terminalPenalty")]
+    public double TerminalPenalty { get; init; }
+}

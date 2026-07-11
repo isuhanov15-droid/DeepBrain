@@ -49,3 +49,5 @@ dotnet build DeepBrain.slnx -p:ML_CORE_PATH="C:\path\to\ML.Core\ML.Core.csproj"
 - `mlconnect` / `mldisconnect` — ручное подключение/отключение remote backend.
 
 После загрузки checkpoint вес сети учитывает сохранённые шаги обучения, даже если replay-буфер нового процесса ещё пуст. Снижение ε для новой политики начинается после накопления как минимум одного batch опыта.
+
+Checkpoint remote backend состоит из локального файла метаданных DeepBrain и пары файлов в рабочем каталоге ML.Host: `<path>` и `<path>.net`. Старый формат с `<path>.net` и `<path>.net.net` поддерживается при чтении и мигрирует после следующего сохранения.

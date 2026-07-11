@@ -13,6 +13,7 @@ public sealed class RewardEngine
         bool isInLoop,
         double loopStrength,
         bool invalidAction,
+        bool socialContactHandled,
         RewardConfig config)
     {
         var homeostasis =
@@ -29,7 +30,7 @@ public sealed class RewardEngine
         explore *= config.ExploreWeight;
 
         var social = 0.0;
-        if (actionName is "emit_message")
+        if (actionName is "emit_message" && socialContactHandled)
             social = config.SocialBase + appraisal.Social * 0.02;
         social *= config.SocialWeight;
 

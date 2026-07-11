@@ -92,7 +92,11 @@
     "loopHoldTicks": 6,
     "panicSafetyMin": 0.10,
     "panicPainMin": 0.95,
-    "panicThreatMin": 0.90
+    "panicThreatMin": 0.90,
+    "panicHoldTicks": 5,
+    "panicRecoverySafety": 0.35,
+    "panicRecoveryPainMax": 0.70,
+    "panicTerminalPenalty": 0.50
   },
   "ml": {
     "enable": false,

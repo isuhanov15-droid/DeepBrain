@@ -5,6 +5,9 @@ public sealed class ScenarioScorer
     public ScenarioScore Score(string scenarioName, EpisodeReport report)
     {
         var name = scenarioName.Trim().ToLowerInvariant();
+        if (string.Equals(report.EndReason, "panic", StringComparison.OrdinalIgnoreCase))
+            return new ScenarioScore(false, $"panic safety={report.AvgSafety:0.00} pain={report.MaxPain:0.00}");
+
         var steps = Math.Max(1, report.Steps);
         var loopRate = report.LoopCount / (double)steps;
         var anxiousRatio = report.MoodDistribution.TryGetValue("anxious", out var anx) ? anx / (double)steps : 0.0;

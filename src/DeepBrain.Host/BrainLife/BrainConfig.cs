@@ -106,7 +106,13 @@ public sealed record BrainConfig(
             PanicSafetyMin: 0.10,
             PanicPainMin: 0.95,
             PanicThreatMin: 0.90
-        ),
+        )
+        {
+            PanicHoldTicks = 5,
+            PanicRecoverySafety = 0.35,
+            PanicRecoveryPainMax = 0.70,
+            PanicTerminalPenalty = 0.50
+        },
         new MlConfig(
             Enable: false,
             StrictRequireCore: false,
@@ -333,7 +339,15 @@ public sealed record EpisodeConfig(
     double PanicSafetyMin,
     double PanicPainMin,
     double PanicThreatMin
-);
+)
+{
+    // These init properties preserve compatibility with older brainconfig.json
+    // files while allowing panic handling to be tuned independently.
+    public int PanicHoldTicks { get; init; } = 5;
+    public double PanicRecoverySafety { get; init; } = 0.35;
+    public double PanicRecoveryPainMax { get; init; } = 0.70;
+    public double PanicTerminalPenalty { get; init; } = 0.50;
+}
 
 public sealed record MlRemoteConfig(
     string Host,
