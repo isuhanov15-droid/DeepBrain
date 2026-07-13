@@ -15,6 +15,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
     private long _trainSteps;
     private int _bufferSize;
     private string? _checkpointError;
+    private string? _trainError;
 
     public RemoteHostBackend(MlConfig config, Action<string> log)
     {
@@ -25,7 +26,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
     public bool IsAvailable => true;
     public string Kind => "remote";
     public bool IsConnected => _client.IsConnected;
-    public string? LastError => _checkpointError ?? _client.LastError;
+    public string? LastError => _checkpointError ?? _trainError ?? _client.LastError;
     public double LastRttMs => _client.LastRttMs;
     public int InputDim => StateVectorizer.InputDim;
     public int ActionCount => ActionCatalog.Count;
@@ -91,12 +92,21 @@ public sealed class RemoteHostBackend : IBrainMlBackend
             return new MlTrainResult(false, double.NaN, 0, _trainSteps, true);
         }
 
-        _bufferSize = resp.BufferSize;
+        _bufferSize = Math.Max(0, resp.BufferSize);
         _trainSteps = resp.TrainSteps;
         _lastLoss = resp.Loss;
-        if (resp.Trained)
-            PushLoss(resp.Loss);
         var isNaN = double.IsNaN(resp.Loss) || double.IsInfinity(resp.Loss);
+
+        if (!resp.Ok)
+        {
+            _trainError = string.IsNullOrWhiteSpace(resp.Reason) ? "ml.train returned ok=false" : resp.Reason;
+            RateLimitedLog($"Предупреждение: ошибка ml.train: {_trainError}");
+            return new MlTrainResult(false, resp.Loss, resp.GradNorm, resp.TrainSteps, isNaN);
+        }
+
+        _trainError = null;
+        if (resp.Trained && !isNaN)
+            PushLoss(resp.Loss);
         return new MlTrainResult(resp.Trained, resp.Loss, resp.GradNorm, resp.TrainSteps, isNaN);
     }
 
@@ -161,6 +171,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         _trainSteps = 0;
         _bufferSize = 0;
         _checkpointError = null;
+        _trainError = null;
         BufferCapacity = Math.Max(1024, config.BufferSize);
         _client.UpdateConfig(config.Remote);
     }

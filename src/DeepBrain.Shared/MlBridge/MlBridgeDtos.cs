@@ -48,11 +48,13 @@ public sealed record MlTrainRequest(
 );
 
 public sealed record MlTrainResponse(
+    bool Ok,
     bool Trained,
     double Loss,
     double GradNorm,
     long TrainSteps,
-    int BufferSize
+    int BufferSize,
+    string? Reason
 );
 
 public sealed record MlCheckpointRequest(string Path);
