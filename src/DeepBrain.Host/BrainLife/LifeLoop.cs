@@ -78,6 +78,7 @@ public sealed class LifeLoop
     private double _episodeRewardSum;
     private RewardDto _episodeRewardBreakdown = new(0, 0, 0, 0, 0, 0);
     private readonly Dictionary<string, int> _episodeActionCounts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _episodeActionRewardSums = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _episodeMoodCounts = new(StringComparer.OrdinalIgnoreCase);
     private int _episodeLoopCount;
     private bool _episodeLoopActive;
@@ -247,10 +248,15 @@ public sealed class LifeLoop
         var lastStored = status.LastStoredAt?.ToString("O") ?? "нет";
         var lastError = string.IsNullOrWhiteSpace(status.LastError) ? "нет" : status.LastError;
         return $"включена={RussianDisplay.YesNo(status.Enabled)} " +
-               $"эпизодов={status.EpisodeCount}/{status.Capacity} " +
+               $"записей={status.EpisodeCount}/{status.Capacity} " +
+               $"эпизодов={status.RepresentedEpisodes} " +
+               $"опыт сценариев={status.ScenarioExperiences} " +
+               $"индекс={status.IndexedBuckets} кандидатов={status.LastCandidateCount} " +
                $"запросов воспоминаний={status.RecallRequests} " +
                $"последний поиск={status.LastRecallCount} " +
                $"сходство={status.LastBestSimilarity:0.000} " +
+               $"объединено={status.DuplicateMerges} забыто={status.ForgottenEntries} " +
+               $"консолидаций={status.ConsolidationRuns} " +
                $"последняя запись={lastStored} " +
                $"повреждённых строк={status.InvalidLines} " +
                $"ошибка={lastError} " +
@@ -269,6 +275,80 @@ public sealed class LifeLoop
         var (config, _) = _configLoader.GetCurrent();
         _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
         return _longTermMemory.Search(query, count).Select(FormatMemoryEntry).ToList();
+    }
+
+    public IReadOnlyList<string> GetMemoryStatsLines()
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        var stats = _longTermMemory.GetStatistics();
+        var lines = new List<string>
+        {
+            $"записей={stats.EntryCount} представлено эпизодов={stats.RepresentedEpisodes} " +
+            $"сценариев={stats.ScenarioCount} устойчивых={stats.MatureScenarioCount} " +
+            $"индекс={stats.IndexBuckets} кандидатов последнего поиска={stats.LastCandidateCount}",
+            $"объединено={stats.DuplicateMerges} забыто={stats.ForgottenEntries} " +
+            $"консолидаций={stats.ConsolidationRuns} средняя значимость={stats.AverageSalience:0.000} " +
+            $"средняя сила={stats.AverageStrength:0.000} опыт={stats.ExperiencePath}"
+        };
+
+        foreach (var experience in _longTermMemory.GetScenarioExperiences())
+        {
+            lines.Add($"сценарий={RussianDisplay.Token(experience.ScenarioName)} " +
+                      $"эпизодов={experience.EpisodeCount} успех={experience.SuccessRate:P0} " +
+                      $"награда={experience.AvgReward:0.000} уверенность={experience.Confidence:0.000} " +
+                      $"помогло={RussianDisplay.Token(experience.HelpfulAction ?? "нет")} " +
+                      $"мешало={RussianDisplay.Token(experience.HarmfulAction ?? "нет")}");
+        }
+
+        return lines;
+    }
+
+    public IReadOnlyList<string> ExplainMemoryLines(string? scenario)
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        var cue = new MemoryCue(
+            string.IsNullOrWhiteSpace(scenario) ? _scenarioName : scenario.Trim(),
+            _affect.Mood,
+            _homeo.Pain,
+            _homeo.Safety,
+            _homeo.Arousal);
+        var explanation = _longTermMemory.Explain(cue);
+        var lines = new List<string>
+        {
+            $"сценарий={RussianDisplay.Token(cue.ScenarioName)} настроение={RussianDisplay.Token(cue.Mood)} " +
+            $"кандидатов={explanation.IndexedCandidates} воспоминаний={explanation.RecalledEpisodes} " +
+            $"сходство={explanation.BestSimilarity:0.000} уверенность={explanation.Confidence:0.000}",
+            $"что помогло={RussianDisplay.Token(explanation.HelpfulAction ?? "нет")} " +
+            $"влияние={explanation.HelpfulScore:+0.000;-0.000;0.000} " +
+            $"что мешало={RussianDisplay.Token(explanation.HarmfulAction ?? "нет")} " +
+            $"влияние={explanation.HarmfulScore:+0.000;-0.000;0.000}"
+        };
+
+        if (explanation.ScenarioExperience is { } experience)
+        {
+            lines.Add($"устойчивый опыт: эпизодов={experience.EpisodeCount} успех={experience.SuccessRate:P0} " +
+                      $"средняя награда={experience.AvgReward:0.000} зрелый={RussianDisplay.YesNo(experience.IsMature)}");
+        }
+
+        lines.AddRange(explanation.Evidence.Select(item =>
+            $"свидетельство эпизод={item.EpisodeId} повторов={item.Occurrences} " +
+            $"сходство={item.Similarity:0.000} релевантность={item.Relevance:0.000} " +
+            $"успех={RussianDisplay.YesNo(item.ScenarioPassed)} награда={item.AvgReward:0.000} " +
+            $"помогло={RussianDisplay.Token(item.HelpfulAction ?? "нет")}"));
+        return lines;
+    }
+
+    public string ConsolidateMemory()
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        var result = _longTermMemory.Consolidate();
+        return $"записей={result.EntriesBefore}→{result.EntriesAfter} " +
+               $"представлено эпизодов={result.RepresentedEpisodes} объединено={result.MergedEntries} " +
+               $"забыто={result.ForgottenEntries} опыт сценариев={result.ScenarioExperiences} " +
+               $"время={result.DurationMs} мс";
     }
 
     private static (bool Enabled, string? Reason) ComputeMlEnabled(MlConfig cfg, string backendKind, bool remoteStrict, bool remoteConnected)
@@ -595,10 +675,14 @@ public sealed class LifeLoop
             EmitTrace("memory.recall", new
             {
                 recalled = memoryRecall.RecallCount,
+                candidates = memoryRecall.IndexedCandidateCount,
                 similarity = memoryRecall.BestSimilarity,
                 episodeId = memoryRecall.BestEpisodeId,
                 actionName = strongest.Key,
-                bias = strongest.Value
+                bias = strongest.Value,
+                helpfulAction = memoryRecall.HelpfulAction,
+                harmfulAction = memoryRecall.HarmfulAction,
+                confidence = memoryRecall.Confidence
             }, ct);
         }
 
@@ -928,13 +1012,16 @@ public sealed class LifeLoop
             {
                 _log($"ПАМЯТЬ: сохранён эпизод id={remembered.EpisodeId} " +
                      $"сценарий={RussianDisplay.Token(remembered.ScenarioName)} " +
-                     $"награда={remembered.AvgReward:0.000} значимость={remembered.Salience:0.00}");
+                     $"награда={remembered.AvgReward:0.000} значимость={remembered.Salience:0.00} " +
+                     $"сила={remembered.Strength:0.00} повторов={remembered.Occurrences}");
                 EmitTrace("memory.store", new
                 {
                     episodeId = remembered.EpisodeId,
                     scenario = remembered.ScenarioName,
                     avgReward = remembered.AvgReward,
-                    salience = remembered.Salience
+                    salience = remembered.Salience,
+                    strength = remembered.Strength,
+                    occurrences = remembered.Occurrences
                 }, ct);
             }
             if (evalCfg.SaveReports)
@@ -1195,6 +1282,7 @@ public sealed class LifeLoop
                $"настроение={RussianDisplay.Token(entry.DominantMood)} " +
                $"тиков={entry.Steps} награда={entry.AvgReward:0.000} " +
                $"петли={entry.LoopCount} пройден={RussianDisplay.YesNo(entry.ScenarioPassed)} " +
+               $"повторов={entry.Occurrences} сила={entry.Strength:0.00} " +
                $"действия=[{string.Join(", ", topActions)}]";
     }
 
@@ -1304,6 +1392,8 @@ public sealed class LifeLoop
         };
 
         _episodeActionCounts[action.Name] = _episodeActionCounts.TryGetValue(action.Name, out var count) ? count + 1 : 1;
+        _episodeActionRewardSums[action.Name] =
+            _episodeActionRewardSums.TryGetValue(action.Name, out var rewardSum) ? rewardSum + reward.Total : reward.Total;
         _episodeMoodCounts[mood] = _episodeMoodCounts.TryGetValue(mood, out var mcount) ? mcount + 1 : 1;
 
         if (loopDetected && !_episodeLoopActive)
@@ -1337,6 +1427,7 @@ public sealed class LifeLoop
         _episodeRewardSum = 0;
         _episodeRewardBreakdown = new RewardDto(0, 0, 0, 0, 0, 0);
         _episodeActionCounts.Clear();
+        _episodeActionRewardSums.Clear();
         _episodeMoodCounts.Clear();
         _episodeLoopCount = 0;
         _episodeLoopActive = false;
@@ -1394,7 +1485,13 @@ public sealed class LifeLoop
             BackendKind: backendKind,
             EpsilonUsed: _episodeLastEpsilon,
             ScenarioScore: null
-        );
+        )
+        {
+            ActionRewardAverages = _episodeActionRewardSums.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value / Math.Max(1, _episodeActionCounts.TryGetValue(pair.Key, out var count) ? count : 1),
+                StringComparer.Ordinal)
+        };
 
         var score = _scenarioScorer.Score(scenarioName, report);
         return report with { ScenarioScore = score };

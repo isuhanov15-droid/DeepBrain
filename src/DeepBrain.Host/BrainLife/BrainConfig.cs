@@ -410,6 +410,18 @@ public sealed record MemoryConfig(
     int MinEpisodeSteps,
     double RewardScale)
 {
+    // Memory v2 settings are init properties so v1.1 configuration files and
+    // existing constructor calls remain source- and JSON-compatible.
+    public double DeduplicationSimilarity { get; init; } = 0.96;
+    public double ConsolidationSimilarity { get; init; } = 0.90;
+    public int ConsolidateEveryEpisodes { get; init; } = 50;
+    public double ForgetAfterDays { get; init; } = 180;
+    public double ForgetThreshold { get; init; } = 0.12;
+    public double RepeatBoost { get; init; } = 0.08;
+    public int ExperienceMinOccurrences { get; init; } = 3;
+    public double ExperienceWeight { get; init; } = 0.35;
+    public int MaxIndexedCandidates { get; init; } = 512;
+
     public static MemoryConfig Default => new(
         Enable: true,
         Path: "memory/episodes.jsonl",
@@ -421,7 +433,18 @@ public sealed record MemoryConfig(
         MinEpisodesBeforeBias: 3,
         MinEpisodeSteps: 25,
         RewardScale: 0.02
-    );
+    )
+    {
+        DeduplicationSimilarity = 0.96,
+        ConsolidationSimilarity = 0.90,
+        ConsolidateEveryEpisodes = 50,
+        ForgetAfterDays = 180,
+        ForgetThreshold = 0.12,
+        RepeatBoost = 0.08,
+        ExperienceMinOccurrences = 3,
+        ExperienceWeight = 0.35,
+        MaxIndexedCandidates = 512
+    };
 }
 
 public sealed record ScenarioConfig(

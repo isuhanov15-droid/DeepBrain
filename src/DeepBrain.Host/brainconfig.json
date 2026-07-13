@@ -150,10 +150,19 @@
     "minSimilarity": 0.45,
     "maxActionBias": 0.15,
     "recencyHalfLifeDays": 90,
-    "minEpisodesBeforeBias": 3,
-    "minEpisodeSteps": 25,
-    "rewardScale": 0.02
-  },
+      "minEpisodesBeforeBias": 3,
+      "minEpisodeSteps": 25,
+      "rewardScale": 0.02,
+      "deduplicationSimilarity": 0.96,
+      "consolidationSimilarity": 0.90,
+      "consolidateEveryEpisodes": 50,
+      "forgetAfterDays": 180,
+      "forgetThreshold": 0.12,
+      "repeatBoost": 0.08,
+      "experienceMinOccurrences": 3,
+      "experienceWeight": 0.35,
+      "maxIndexedCandidates": 512
+    },
   "scenarios": {
     "calm_baseline": {
       "baselineThreat": 0.08,

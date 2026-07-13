@@ -30,4 +30,11 @@ public sealed record EpisodeReport(
     [property: JsonPropertyName("backendKind")] string BackendKind,
     [property: JsonPropertyName("epsilonUsed")] double EpsilonUsed,
     [property: JsonPropertyName("scenarioScore")] ScenarioScore? ScenarioScore
-);
+)
+{
+    // Optional v2 telemetry. Older reports deserialize with an empty map and
+    // older consumers can ignore the new JSON property.
+    [JsonPropertyName("actionRewardAverages")]
+    public IReadOnlyDictionary<string, double> ActionRewardAverages { get; init; } =
+        new Dictionary<string, double>(StringComparer.Ordinal);
+}

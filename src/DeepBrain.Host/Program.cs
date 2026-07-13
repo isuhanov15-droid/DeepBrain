@@ -230,6 +230,7 @@ static void RunCommandLoop(
         "resetml (сброс ML), resetepisode или episode.reset (сброс эпизода), " +
         "mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, " +
         "curriculum.mode, curriculum.next, memory.status, memory.recent, memory.search, " +
+        "memory.explain, memory.stats, memory.consolidate, " +
         "reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
@@ -380,6 +381,25 @@ static void RunCommandLoop(
                     LogLine(consoleLockProvider(), logBuffer, logWriter, $"ВОСПОМИНАНИЕ: {memory}");
                 break;
             }
+            case "memory.explain":
+            {
+                var lines = lifeLoop?.ExplainMemoryLines(arg) ?? Array.Empty<string>();
+                foreach (var memoryLine in lines)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"ОБЪЯСНЕНИЕ ПАМЯТИ: {memoryLine}");
+                break;
+            }
+            case "memory.stats":
+            {
+                var lines = lifeLoop?.GetMemoryStatsLines() ?? Array.Empty<string>();
+                foreach (var memoryLine in lines)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"СТАТИСТИКА ПАМЯТИ: {memoryLine}");
+                break;
+            }
+            case "memory.consolidate":
+                if (lifeLoop is not null)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        $"КОНСОЛИДАЦИЯ ПАМЯТИ: {lifeLoop.ConsolidateMemory()}");
+                break;
             case "reloadconfig":
                 configLoader.ReloadNow();
                 LogLine(consoleLockProvider(), logBuffer, logWriter, "Запрошена перезагрузка конфигурации");
