@@ -163,6 +163,31 @@
       "experienceWeight": 0.35,
       "maxIndexedCandidates": 512
     },
+  "llm": {
+    "enable": false,
+    "provider": "ollama",
+    "baseUrl": "http://127.0.0.1:11434/",
+    "model": "qwen3.5:4b-q4_K_M",
+    "autoObserve": false,
+    "observeEveryTicks": 300,
+    "timeoutSeconds": 120,
+    "maxStalenessTicks": 600,
+    "numPredict": 128,
+    "temperature": 0.1,
+    "keepAlive": "5m",
+    "maxMemoryLines": 2,
+    "maxRecentEvents": 2,
+    "maxContextChars": 96
+  },
+  "externalApi": {
+    "enable": false,
+    "prefix": "http://127.0.0.1:8787/",
+    "requireToken": false,
+    "tokenEnvironmentVariable": "DEEPBRAIN_API_TOKEN",
+    "statePublishEveryTicks": 5,
+    "allowedOrigins": [],
+    "subscriberBufferCapacity": 128
+  },
   "scenarios": {
     "calm_baseline": {
       "baselineThreat": 0.08,

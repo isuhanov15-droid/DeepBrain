@@ -31,7 +31,9 @@ public sealed record BrainConfig(
     int SelfTalkLoopHoldTicks = 5,
     int SelfTalkRecoveryHoldTicks = 5,
     int SelfTalkCalmWindowHoldTicks = 3,
-    MemoryConfig? Memory = null)
+    MemoryConfig? Memory = null,
+    LlmConfig? Llm = null,
+    ExternalApiConfig? ExternalApi = null)
 {
     public static BrainConfig Default => new(
         new WorldConfig(
@@ -249,7 +251,9 @@ public sealed record BrainConfig(
         SelfTalkLoopHoldTicks: 3,
         SelfTalkRecoveryHoldTicks: 3,
         SelfTalkCalmWindowHoldTicks: 3,
-        Memory: MemoryConfig.Default
+        Memory: MemoryConfig.Default,
+        Llm: LlmConfig.Default,
+        ExternalApi: ExternalApiConfig.Default
     );
 }
 
@@ -445,6 +449,87 @@ public sealed record MemoryConfig(
         ExperienceWeight = 0.35,
         MaxIndexedCandidates = 512
     };
+}
+
+public sealed record LlmConfig
+{
+    public bool Enable { get; init; }
+    public string Provider { get; init; } = "ollama";
+    public string BaseUrl { get; init; } = "http://127.0.0.1:11434/";
+    public string Model { get; init; } = "qwen3.5:4b-q4_K_M";
+    public bool AutoObserve { get; init; }
+    public int ObserveEveryTicks { get; init; } = 300;
+    public int TimeoutSeconds { get; init; } = 120;
+    public int MaxStalenessTicks { get; init; } = 600;
+    public int NumPredict { get; init; } = 128;
+    public double Temperature { get; init; } = 0.1;
+    public string KeepAlive { get; init; } = "5m";
+    public int MaxMemoryLines { get; init; } = 2;
+    public int MaxRecentEvents { get; init; } = 2;
+    public int MaxContextChars { get; init; } = 96;
+
+    public static LlmConfig Default => new();
+
+    public LlmConfig Normalize() => this with
+    {
+        Provider = string.IsNullOrWhiteSpace(Provider) ? "ollama" : Provider.Trim().ToLowerInvariant(),
+        BaseUrl = NormalizeBaseUrl(BaseUrl),
+        Model = string.IsNullOrWhiteSpace(Model) ? "qwen3.5:4b-q4_K_M" : Model.Trim(),
+        ObserveEveryTicks = Math.Clamp(ObserveEveryTicks, 10, 1_000_000),
+        TimeoutSeconds = Math.Clamp(TimeoutSeconds, 5, 600),
+        MaxStalenessTicks = Math.Clamp(MaxStalenessTicks, 1, 100_000),
+        NumPredict = Math.Clamp(NumPredict, 32, 1024),
+        Temperature = Math.Clamp(double.IsFinite(Temperature) ? Temperature : 0.1, 0, 1),
+        KeepAlive = string.IsNullOrWhiteSpace(KeepAlive) ? "5m" : KeepAlive.Trim(),
+        MaxMemoryLines = Math.Clamp(MaxMemoryLines, 0, 8),
+        MaxRecentEvents = Math.Clamp(MaxRecentEvents, 0, 12),
+        MaxContextChars = Math.Clamp(MaxContextChars, 40, 400)
+    };
+
+    private static string NormalizeBaseUrl(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value)
+            ? "http://127.0.0.1:11434/"
+            : value.Trim();
+        return normalized.EndsWith('/') ? normalized : normalized + "/";
+    }
+}
+
+public sealed record ExternalApiConfig
+{
+    public bool Enable { get; init; }
+    public string Prefix { get; init; } = "http://127.0.0.1:8787/";
+    public bool RequireToken { get; init; }
+    public string TokenEnvironmentVariable { get; init; } = "DEEPBRAIN_API_TOKEN";
+    public int StatePublishEveryTicks { get; init; } = 5;
+    public string[] AllowedOrigins { get; init; } = Array.Empty<string>();
+    public int SubscriberBufferCapacity { get; init; } = 128;
+
+    public static ExternalApiConfig Default => new();
+
+    public ExternalApiConfig Normalize()
+    {
+        var prefix = string.IsNullOrWhiteSpace(Prefix)
+            ? "http://127.0.0.1:8787/"
+            : Prefix.Trim();
+        if (!prefix.EndsWith('/'))
+            prefix += "/";
+
+        return this with
+        {
+            Prefix = prefix,
+            TokenEnvironmentVariable = string.IsNullOrWhiteSpace(TokenEnvironmentVariable)
+                ? "DEEPBRAIN_API_TOKEN"
+                : TokenEnvironmentVariable.Trim(),
+            StatePublishEveryTicks = Math.Clamp(StatePublishEveryTicks, 1, 10_000),
+            AllowedOrigins = (AllowedOrigins ?? Array.Empty<string>())
+                .Where(origin => !string.IsNullOrWhiteSpace(origin))
+                .Select(origin => origin.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            SubscriberBufferCapacity = Math.Clamp(SubscriberBufferCapacity, 8, 4096)
+        };
+    }
 }
 
 public sealed record ScenarioConfig(

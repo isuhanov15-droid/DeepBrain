@@ -1,5 +1,6 @@
 ﻿using System.Linq;
 using System.IO;
+using System.Globalization;
 using DeepBrain.Host.BrainLife.Ml;
 using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.BrainDtos.V4;
@@ -337,6 +338,39 @@ public sealed class LifeLoop
             $"сходство={item.Similarity:0.000} релевантность={item.Relevance:0.000} " +
             $"успех={RussianDisplay.YesNo(item.ScenarioPassed)} награда={item.AvgReward:0.000} " +
             $"помогло={RussianDisplay.Token(item.HelpfulAction ?? "нет")}"));
+        return lines;
+    }
+
+    public IReadOnlyList<string> GetCortexMemoryLines()
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+        var cue = new MemoryCue(
+            _scenarioName,
+            _affect.Mood,
+            _homeo.Pain,
+            _homeo.Safety,
+            _homeo.Arousal);
+        var explanation = _longTermMemory.Explain(cue);
+        var lines = new List<string>
+        {
+            $"recall={explanation.RecalledEpisodes};sim={FormatCortexNumber(explanation.BestSimilarity)};" +
+            $"help={CompactCortexToken(explanation.HelpfulAction)};" +
+            $"helpScore={FormatCortexNumber(explanation.HelpfulScore)};" +
+            $"harm={CompactCortexToken(explanation.HarmfulAction)};" +
+            $"harmScore={FormatCortexNumber(explanation.HarmfulScore)};" +
+            $"conf={FormatCortexNumber(explanation.Confidence)}"
+        };
+
+        if (explanation.ScenarioExperience is { } experience)
+        {
+            lines.Add(
+                $"episodes={experience.EpisodeCount};" +
+                $"success={FormatCortexNumber(experience.SuccessRate)};" +
+                $"avg={FormatCortexNumber(experience.AvgReward)};" +
+                $"mature={(experience.IsMature ? 1 : 0)}");
+        }
+
         return lines;
     }
 
@@ -1285,6 +1319,24 @@ public sealed class LifeLoop
                $"повторов={entry.Occurrences} сила={entry.Strength:0.00} " +
                $"действия=[{string.Join(", ", topActions)}]";
     }
+
+    private static string CompactCortexToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "none";
+
+        var compact = value.Trim()
+            .Replace('\r', '_')
+            .Replace('\n', '_')
+            .Replace('\t', '_')
+            .Replace(';', '_')
+            .Replace('|', '_')
+            .Replace('=', '_');
+        return compact.Length <= 48 ? compact : compact[..47] + "…";
+    }
+
+    private static string FormatCortexNumber(double value) =>
+        (double.IsFinite(value) ? value : 0).ToString("0.###", CultureInfo.InvariantCulture);
 
     private static int ComputeEmitCooldownTicks(string voiceMode, double attachmentBaseline, bool isAnxious, ActionsConfig actions)
     {

@@ -3,7 +3,9 @@ using System.IO;
 using DeepBrain.Host.Brain;
 using DeepBrain.Host.Brain.Input;
 using DeepBrain.Host.BrainLife;
+using DeepBrain.Host.Cognition;
 using DeepBrain.Host.ConsoleUi;
+using DeepBrain.Host.External;
 using DeepBrain.Host.Infrastructure;
 using DeepBrain.Host.Net;
 using DeepBrain.Shared.Brain;
@@ -60,6 +62,19 @@ LogLine(consoleLock, logBuffer, logWriter,
 var configPath = HostConfigPathResolver.Resolve(args, AppContext.BaseDirectory);
 LogLine(consoleLock, logBuffer, logWriter, $"Конфигурация: {configPath}");
 var configLoader = new BrainConfigLoader(configPath, msg => LogLine(consoleLock, logBuffer, logWriter, msg));
+var externalEvents = new ExternalEventHub();
+var cortex = new LlmCortexOrchestrator(
+    () => configLoader.GetCurrent().Config.Llm ?? LlmConfig.Default,
+    () => lifeLoop?.GetCortexMemoryLines() ?? Array.Empty<string>(),
+    insight => externalEvents.PublishInsight(insight),
+    msg => LogLine(consoleLock, logBuffer, logWriter, msg));
+var externalApi = new ExternalApiServer(
+    () => configLoader.GetCurrent().Config.ExternalApi ?? ExternalApiConfig.Default,
+    externalEvents,
+    cortex,
+    () => lifeLoop?.GetMlStatus() ?? "ML недоступен",
+    () => lifeLoop?.GetMemoryStatus() ?? "Память недоступна",
+    msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
 LogLine(consoleLock, logBuffer, logWriter,
     mlCoreAvailable
@@ -78,6 +93,9 @@ lifeLoop = new LifeLoop(
     (state, ct) =>
     {
         server.BroadcastLifeStateAsync(state, ct).GetAwaiter().GetResult();
+        cortex.PublishState(state);
+        var externalConfig = configLoader.GetCurrent().Config.ExternalApi ?? ExternalApiConfig.Default;
+        externalEvents.PublishState(state, externalConfig.Normalize().StatePublishEveryTicks);
         ui.UpdateState(state);
         RenderScreen(ui, consoleLock);
     },
@@ -98,16 +116,19 @@ lifeLoop = new LifeLoop(
         LogLine(consoleLock, logBuffer, logWriter,
             $"[жизнь] ВЫВОД тик={output.Tick} клиентов={server.ClientCount} сообщение={output.Message}");
         server.BroadcastLifeOutputAsync(output, ct).GetAwaiter().GetResult();
+        externalEvents.PublishOutput(output);
     },
     msg => LogLine(consoleLock, logBuffer, logWriter, msg)
 );
 
 try
 {
-    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.1.0";
+    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.3.0";
     LogLine(consoleLock, logBuffer, logWriter, $"Запуск DeepBrain.Host v{hostVersion}...");
 
     await server.StartAsync(cts.Token);
+    cortex.Start(cts.Token);
+    await externalApi.StartAsync(cts.Token);
 
     LogLine(consoleLock, logBuffer, logWriter, "DeepBrain.Host запущен и слушает порт 5555");
     if (!useLifeLoop)
@@ -121,7 +142,7 @@ try
         : RunBrainLoopAsync(brain, server, () => Volatile.Read(ref traceEnabled) == 1, ui, () => consoleLock, logBuffer, logWriter, traceWriter, cts.Token);
     if (HostConsoleRuntime.Mode != HostConsoleMode.Quiet && CanUseInteractiveConsoleInput())
     {
-        _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, configLoader, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
+        _ = Task.Run(() => RunCommandLoop(cts, brain, lifeLoop, configLoader, cortex, externalApi, () => Volatile.Read(ref traceEnabled) == 1, v => Interlocked.Exchange(ref traceEnabled, v), ui, () => consoleLock, logBuffer, logWriter));
     }
     else
     {
@@ -141,6 +162,9 @@ finally
 {
     logWriter.Flush();
     traceWriter.Flush();
+    await externalApi.DisposeAsync();
+    await cortex.DisposeAsync();
+    externalEvents.Dispose();
     await server.DisposeAsync();
 }
 
@@ -218,6 +242,8 @@ static void RunCommandLoop(
     BrainEngine brain,
     LifeLoop? lifeLoop,
     BrainConfigLoader configLoader,
+    LlmCortexOrchestrator cortex,
+    ExternalApiServer externalApi,
     Func<bool> traceOn,
     Action<int> setTrace,
     ConsoleUiState ui,
@@ -231,6 +257,7 @@ static void RunCommandLoop(
         "mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, " +
         "curriculum.mode, curriculum.next, memory.status, memory.recent, memory.search, " +
         "memory.explain, memory.stats, memory.consolidate, " +
+        "llm.status, llm.observe, llm.last, api.status, " +
         "reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
@@ -399,6 +426,32 @@ static void RunCommandLoop(
                 if (lifeLoop is not null)
                     LogLine(consoleLockProvider(), logBuffer, logWriter,
                         $"КОНСОЛИДАЦИЯ ПАМЯТИ: {lifeLoop.ConsolidateMemory()}");
+                break;
+            case "llm.status":
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    $"LLM CORTEX: {cortex.GetStatusLine()}");
+                break;
+            case "llm.observe":
+            {
+                var queued = cortex.TryQueueObservation("console", out var frameId);
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    queued
+                        ? $"LLM Cortex: запрос поставлен в очередь frame={frameId}"
+                        : $"LLM Cortex: запрос не поставлен в очередь; {cortex.GetStatusLine()}");
+                break;
+            }
+            case "llm.last":
+            {
+                var insight = cortex.GetLastInsight();
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    insight is null
+                        ? "LLM Cortex: принятых наблюдений пока нет"
+                        : $"LLM CORTEX LAST: {JsonSerializer.Serialize(insight, JsonWire.Options)}");
+                break;
+            }
+            case "api.status":
+                LogLine(consoleLockProvider(), logBuffer, logWriter,
+                    $"ВНЕШНИЙ API: {externalApi.GetStatusLine()}");
                 break;
             case "reloadconfig":
                 configLoader.ReloadNow();
