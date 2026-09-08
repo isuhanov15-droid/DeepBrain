@@ -51,12 +51,16 @@ public sealed class ExternalApiContractTests
         {
             BaseUrl = "http://127.0.0.1:11434",
             ObserveEveryTicks = 0,
+            MinObserveGapTicks = 0,
             TimeoutSeconds = 1,
             NumPredict = 5000,
             Temperature = double.NaN,
             MaxMemoryLines = 100,
             MaxRecentEvents = 100,
-            MaxContextChars = 1
+            MaxContextChars = 1,
+            MinConfidence = double.NaN,
+            JournalPath = " ",
+            MaxJournalEntries = 1
         }.Normalize();
         var api = new ExternalApiConfig
         {
@@ -66,12 +70,16 @@ public sealed class ExternalApiContractTests
 
         Assert.EndsWith("/", llm.BaseUrl);
         Assert.Equal(10, llm.ObserveEveryTicks);
+        Assert.Equal(10, llm.MinObserveGapTicks);
         Assert.Equal(5, llm.TimeoutSeconds);
         Assert.Equal(1024, llm.NumPredict);
         Assert.Equal(0.1, llm.Temperature, 3);
         Assert.Equal(8, llm.MaxMemoryLines);
         Assert.Equal(12, llm.MaxRecentEvents);
         Assert.Equal(40, llm.MaxContextChars);
+        Assert.Equal(0.45, llm.MinConfidence, 3);
+        Assert.Equal("memory/inner-voice.jsonl", llm.JournalPath);
+        Assert.Equal(10, llm.MaxJournalEntries);
         Assert.EndsWith("/", api.Prefix);
         Assert.Equal(8, api.SubscriberBufferCapacity);
     }
@@ -85,6 +93,8 @@ public sealed class ExternalApiContractTests
         Assert.Equal(2, llm.MaxMemoryLines);
         Assert.Equal(2, llm.MaxRecentEvents);
         Assert.Equal(96, llm.MaxContextChars);
+        Assert.Equal(0.45, llm.MinConfidence, 3);
+        Assert.True(llm.PersistJournal);
     }
 
     [Fact]

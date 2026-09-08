@@ -38,7 +38,13 @@ public sealed class EpisodeReportTests
             BackendKind: "stub",
             EpsilonUsed: 0.0,
             ScenarioScore: new ScenarioScore(true, "ok")
-        );
+        )
+        {
+            ReportSchemaVersion = 3,
+            RunId = "run-test",
+            HostVersion = "1.4.0",
+            ConfigVersion = "cfg-test"
+        };
 
         var json = JsonSerializer.Serialize(report);
         var roundTrip = JsonSerializer.Deserialize<EpisodeReport>(json);
@@ -47,5 +53,9 @@ public sealed class EpisodeReportTests
         Assert.Equal(report.ScenarioName, roundTrip.ScenarioName);
         Assert.Equal(report.Steps, roundTrip.Steps);
         Assert.Equal(report.EndReason, roundTrip.EndReason);
+        Assert.Equal(3, roundTrip.ReportSchemaVersion);
+        Assert.Equal("run-test", roundTrip.RunId);
+        Assert.Equal("1.4.0", roundTrip.HostVersion);
+        Assert.Equal("cfg-test", roundTrip.ConfigVersion);
     }
 }

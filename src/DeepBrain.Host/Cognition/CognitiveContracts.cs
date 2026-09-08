@@ -5,7 +5,7 @@ namespace DeepBrain.Host.Cognition;
 
 public static class CognitiveContract
 {
-    public const string Version = "deepbrain.cortex.v1";
+    public const string Version = "deepbrain.cortex.v2";
     public const int InterpretationMaxLength = 200;
     public const int InnerSpeechMaxLength = 140;
     public const int MemoryQuestionMaxLength = 160;
@@ -35,7 +35,18 @@ public sealed record CognitiveFrame(
     double LastReward,
     IReadOnlyList<string> RecentEvents,
     IReadOnlyList<string> MemoryContext
-);
+)
+{
+    public double Energy { get; init; }
+    public double Fatigue { get; init; }
+    public double ExplorationNeed { get; init; }
+    public double AttachmentNeed { get; init; }
+    public double AgencyNeed { get; init; }
+    public string AttentionFocus { get; init; } = "";
+    public string ActiveHabitId { get; init; } = "";
+    public double HabitInfluence { get; init; }
+    public string PreviousInnerSpeech { get; init; } = "";
+}
 
 public sealed record CognitiveInsight(
     [property: JsonPropertyName("interpretation")] string Interpretation,
@@ -190,5 +201,8 @@ public sealed record LlmCortexStatus(
     long LastFrameAgeTicks = 0,
     LlmGenerationMetrics? LastMetrics = null,
     DateTimeOffset? InFlightStartedAt = null,
-    double InFlightSeconds = 0
+    double InFlightSeconds = 0,
+    long DroppedLowConfidence = 0,
+    long LastAutoQueuedTick = 0,
+    CognitiveJournalStatus? Journal = null
 );

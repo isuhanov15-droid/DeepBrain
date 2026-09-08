@@ -366,3 +366,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local production configuration and archived experience
+/brainconfig-v1.4-live.json
+/src/DeepBrain.Host/habits-v1.3.0-snapshot.json
+/Trace/

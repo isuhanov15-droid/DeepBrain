@@ -96,16 +96,11 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         if (!infer.Ok || infer.QValues.Length != ActionCatalog.Count || infer.QValues.Any(v => double.IsNaN(v) || double.IsInfinity(v)))
             return new PolicyDecision(heuristicBest, 0, 0, 0, "heuristic", false, false, false);
 
-        var probs = infer.Probabilities is { Length: > 0 }
-            ? infer.Probabilities.Select(v => (double)v).ToArray()
-            : MlMath.Softmax(infer.QValues);
-        if (probs.Length != ActionCatalog.Count)
-            probs = MlMath.Softmax(infer.QValues);
-        _avgQ = infer.AvgQ;
-
+        // Mask before exponentiation: a forbidden large Q must not underflow
+        // the probabilities of every permitted action to zero.
         var mask = config.ActionMasking ? MlMath.NormalizeMask(actionMask) : null;
-        if (mask is not null)
-            MlMath.ApplyMask(probs, mask);
+        var probs = MlMath.Softmax(infer.QValues, mask);
+        _avgQ = infer.AvgQ;
 
         _entropy = MlMath.ComputeEntropy(probs);
         var effectiveTrainSteps = EffectiveTrainSteps();
@@ -144,11 +139,7 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
 
         var clampedReward = (float)Math.Clamp(reward, -1.0, 1.0);
         var mask = config.ActionMasking ? MlMath.NormalizeMask(nextActionMask) : null;
-        mask ??= new float[ActionCatalog.Count];
-        if (mask.All(v => v == 0f))
-        {
-            for (var i = 0; i < mask.Length; i++) mask[i] = 1f;
-        }
+        mask ??= Enumerable.Repeat(1f, ActionCatalog.Count).ToArray();
 
         var transition = new Transition(state, actionIdx, clampedReward, nextState, done, mask);
         var result = _backend.TrainAsync(transition, config, tick, CancellationToken.None).GetAwaiter().GetResult();
@@ -205,11 +196,12 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(dir))
             Directory.CreateDirectory(dir);
-        var backendPath = _backend.Kind == "remote" ? path : path + ".net";
+        var backendPath = _backend.Kind == "remote" ? path + ".remote" : path + ".net";
         _backend.TrySave(backendPath, episodeId);
         var meta = new MlCheckpointMeta(episodeId, _epsilon, EffectiveTrainSteps(), backendPath);
         var json = JsonSerializer.Serialize(meta);
-        File.WriteAllText(path, json);
+        File.WriteAllText(path + ".tmp", json);
+        File.Move(path + ".tmp", path, overwrite: true);
     }
 
     public MlPolicyDto BuildTelemetry(bool enabled, bool coreAvailable, int inputDim, int actionCount, double avgReward200, string? reasonIfDisabled, string mlMode, bool trainEnabled, int trainingEpisodeCount, int evalEpisodeCount)

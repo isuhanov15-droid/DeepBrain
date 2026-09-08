@@ -69,7 +69,7 @@ public sealed class MlCheckpointTests
     }
 
     [Fact]
-    public void RemoteSaveUsesSingleCheckpointBasePath()
+    public void RemoteSaveSeparatesWrapperFromServiceMetadata()
     {
         var directory = CreateTempDirectory();
         try
@@ -81,9 +81,9 @@ public sealed class MlCheckpointTests
 
             advisor.TrySave(path, episodeId: 81);
 
-            Assert.Equal(path, backend.SavedPath);
+            Assert.Equal(path + ".remote", backend.SavedPath);
             using var json = JsonDocument.Parse(File.ReadAllText(path));
-            Assert.Equal(path, json.RootElement.GetProperty("WeightsPath").GetString());
+            Assert.Equal(path + ".remote", json.RootElement.GetProperty("WeightsPath").GetString());
             Assert.Equal(3_344, json.RootElement.GetProperty("TrainSteps").GetInt64());
         }
         finally

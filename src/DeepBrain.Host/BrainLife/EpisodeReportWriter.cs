@@ -18,14 +18,22 @@ public sealed class EpisodeReportWriter
         WriteIndented = false
     };
 
+    private readonly Task _worker;
+
     public EpisodeReportWriter()
     {
-        _ = Task.Run(ProcessAsync);
+        _worker = Task.Run(ProcessAsync);
     }
 
     public void Write(EpisodeReport report)
     {
         _channel.Writer.TryWrite(report);
+    }
+
+    public Task CompleteAsync()
+    {
+        _channel.Writer.TryComplete();
+        return _worker;
     }
 
     private async Task ProcessAsync()

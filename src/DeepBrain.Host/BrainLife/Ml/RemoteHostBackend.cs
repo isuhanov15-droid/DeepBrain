@@ -16,6 +16,8 @@ public sealed class RemoteHostBackend : IBrainMlBackend
     private int _bufferSize;
     private string? _checkpointError;
     private string? _trainError;
+    private string? _serverInstance;
+    private bool _serverChanged;
 
     public RemoteHostBackend(MlConfig config, Action<string> log)
     {
@@ -45,7 +47,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
             ActionMask: config.ActionMasking ? ToBoolMask(actionMask) : null,
             InputDim: StateVectorizer.InputDim,
             ActionCount: ActionCatalog.Count
-        );
+        ) { Seed = config.Seed, LearningRate = config.LearningRate };
 
         var resp = await _client.CallAsync<MlInferRequest, MlInferResponse>("ml.infer", req, ct);
         if (resp == null)
@@ -54,12 +56,25 @@ public sealed class RemoteHostBackend : IBrainMlBackend
             return new MlInferResult(false, Array.Empty<double>(), null, 0, 0);
         }
 
+        if (!resp.Ok)
+        {
+            _trainError = resp.Reason ?? "ml.infer returned ok=false";
+            return new MlInferResult(false, Array.Empty<double>(), null, 0, 0);
+        }
+        if (_serverChanged || (_serverInstance is not null && resp.ServerInstance != _serverInstance))
+        {
+            _serverChanged = true;
+            _checkpointError = "ML.Host restarted independently; training/save suspended; restart both hosts to restore checkpoint";
+            return new MlInferResult(false, Array.Empty<double>(), null, 0, 0);
+        }
+        _serverInstance = resp.ServerInstance;
         _avgQ = resp.AvgQ;
         return new MlInferResult(true, resp.QValues, resp.Probabilities, resp.Entropy, resp.AvgQ);
     }
 
     public async Task<MlTrainResult> TrainAsync(Transition transition, MlConfig config, long tick, CancellationToken ct)
     {
+        if (!await CheckInstanceAsync(ct)) return new MlTrainResult(false, double.NaN, 0, _trainSteps, true);
         BufferCapacity = Math.Max(1024, config.BufferSize);
         var req = new MlTrainRequest(
             Tick: tick,
@@ -85,6 +100,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
             ActionCount: ActionCatalog.Count
         );
 
+        req = req with { ExpectedInstanceId = _serverInstance };
         var resp = await _client.CallAsync<MlTrainRequest, MlTrainResponse>("ml.train", req, ct);
         if (resp == null)
         {
@@ -151,13 +167,14 @@ public sealed class RemoteHostBackend : IBrainMlBackend
 
     public void TrySave(string path, int episodeId)
     {
-        var req = new MlCheckpointRequest(path);
+        if (!CheckInstanceAsync(CancellationToken.None).GetAwaiter().GetResult()) throw new IOException(_checkpointError ?? "ML unavailable");
+        var req = new MlCheckpointRequest(path) { ExpectedInstanceId = _serverInstance };
         var resp = _client.CallAsync<MlCheckpointRequest, MlCheckpointResponse>("ml.checkpoint.save", req, CancellationToken.None).GetAwaiter().GetResult();
         if (resp is null || !resp.Ok)
         {
             _checkpointError = resp?.Meta ?? _client.LastError ?? "checkpoint save: no response";
             _log($"Предупреждение: ML checkpoint не сохранён: {_checkpointError}");
-            return;
+            throw new IOException(_checkpointError);
         }
 
         _checkpointError = null;
@@ -165,6 +182,11 @@ public sealed class RemoteHostBackend : IBrainMlBackend
 
     public void Reset(MlConfig config)
     {
+        _client.UpdateConfig(config.Remote);
+        var response = _client.CallAsync<MlResetRequest, MlCheckpointResponse>("ml.reset",
+            new MlResetRequest(config.Seed, config.LearningRate), CancellationToken.None).GetAwaiter().GetResult();
+        if (response?.Ok != true) throw new IOException("ML reset failed: " + response?.Meta);
+        _serverChanged = false; _serverInstance = null;
         _lossWindow.Clear();
         _lastLoss = 0;
         _avgQ = 0;
@@ -174,6 +196,22 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         _trainError = null;
         BufferCapacity = Math.Max(1024, config.BufferSize);
         _client.UpdateConfig(config.Remote);
+    }
+
+    private sealed record InstanceStatus(string? InstanceId);
+    private async Task<bool> CheckInstanceAsync(CancellationToken ct)
+    {
+        if (_serverChanged) return false;
+        var status = await _client.CallAsync<object, InstanceStatus>("ml.ping", new { }, ct);
+        if (status is null) return false;
+        if (_serverInstance is not null && status.InstanceId != _serverInstance)
+        {
+            _serverChanged = true;
+            _checkpointError = "ML.Host restarted independently; training/save suspended; restart both hosts to restore checkpoint";
+            return false;
+        }
+        _serverInstance = status.InstanceId;
+        return true;
     }
 
     public void ResetCounters()

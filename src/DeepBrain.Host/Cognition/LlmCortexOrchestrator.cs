@@ -13,6 +13,7 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
     private readonly Action<CognitiveInsightEnvelope> _onInsight;
     private readonly Action<string> _log;
     private readonly ILlmCortexClient _client;
+    private readonly CognitiveJournal _journal;
 
     private CancellationTokenSource? _lifetime;
     private Task? _activeRequest;
@@ -23,6 +24,8 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
     private long _completed;
     private long _failed;
     private long _droppedAsStale;
+    private long _droppedLowConfidence;
+    private long _lastAutoQueuedTick;
     private long _activeFrameTick;
     private long _lastFrameAgeTicks;
     private int _inFlight;
@@ -31,6 +34,9 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
     private DateTimeOffset? _activeRequestStartedAt;
     private DateTimeOffset? _lastSuccessAt;
     private string? _lastError;
+    private string? _lastPublishedScenario;
+    private string? _lastPublishedMood;
+    private string? _lastPublishedDrive;
 
     public LlmCortexOrchestrator(
         Func<LlmConfig> configProvider,
@@ -44,6 +50,7 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
         _onInsight = onInsight;
         _log = log;
         _client = client ?? new OllamaCortexClient();
+        _journal = new CognitiveJournal(log);
     }
 
     public void Start(CancellationToken cancellationToken)
@@ -56,6 +63,9 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
         }
 
         var config = GetConfig();
+        _journal.Configure(config);
+        lock (_sync)
+            _lastInsight ??= _journal.GetLast();
         _log(config.Enable
             ? $"LLM Cortex включён: provider={config.Provider} model={config.Model} auto={RussianBool(config.AutoObserve)}"
             : "LLM Cortex отключён конфигурацией");
@@ -63,18 +73,42 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
 
     public void PublishState(LifeStateDto state)
     {
+        string? transition;
         lock (_sync)
         {
             _latestState = state;
             _latestStateTick = state.Tick;
+            transition = ReadTransitionLocked(state);
         }
 
         var config = GetConfig();
         if (!config.Enable || !config.AutoObserve || state.Tick <= 0)
             return;
 
-        if (state.Tick % config.ObserveEveryTicks == 0)
-            TryQueueObservation("interval", out _);
+        if (Volatile.Read(ref _inFlight) == 1)
+            return;
+
+        long lastAutoTick;
+        lock (_sync)
+            lastAutoTick = _lastAutoQueuedTick;
+        var age = Math.Max(0, state.Tick - lastAutoTick);
+        var firstObservation = lastAutoTick == 0;
+        var intervalDue = firstObservation || age >= config.ObserveEveryTicks;
+        var transitionDue = config.ObserveOnTransitions && transition is not null &&
+                            (firstObservation || age >= config.MinObserveGapTicks);
+        if (!intervalDue && !transitionDue)
+            return;
+
+        var reason = firstObservation
+            ? "auto.start"
+            : transitionDue
+                ? $"auto.transition:{transition}"
+                : "auto.interval";
+        if (TryQueueObservation(reason, out _))
+        {
+            lock (_sync)
+                _lastAutoQueuedTick = state.Tick;
+        }
     }
 
     public bool TryQueueObservation(string reason, out long frameId)
@@ -165,7 +199,10 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
                 _lastFrameAgeTicks,
                 _lastMetrics,
                 inFlightStartedAt,
-                inFlightSeconds);
+                inFlightSeconds,
+                _droppedLowConfidence,
+                _lastAutoQueuedTick,
+                _journal.GetStatus());
         }
     }
 
@@ -174,6 +211,9 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
         lock (_sync)
             return _lastInsight;
     }
+
+    public IReadOnlyList<CognitiveInsightEnvelope> GetRecentJournal(int count) =>
+        _journal.GetRecent(count);
 
     public string GetStatusLine()
     {
@@ -189,6 +229,7 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
         return $"включён={RussianBool(status.Enabled)} provider={status.Provider} model={status.Model} " +
                $"запрос={RussianBool(status.InFlight)} последний тик={status.LatestStateTick} " +
                $"готово={status.Completed} ошибок={status.Failed} устарело={status.DroppedAsStale} " +
+               $"низкая уверенность={status.DroppedLowConfidence} авто-тик={status.LastAutoQueuedTick} " +
                $"последняя ошибка={status.LastError ?? "нет"}{current}{last}";
     }
 
@@ -269,6 +310,18 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
                 return;
             }
 
+            if (response.Insight.Confidence < config.MinConfidence)
+            {
+                lock (_sync)
+                {
+                    _droppedLowConfidence++;
+                    _lastError = $"LLM уверенность {response.Insight.Confidence:F2} ниже порога {config.MinConfidence:F2}";
+                }
+                _log($"LLM Cortex: ответ frame={frame.FrameId} не принят из-за низкой уверенности " +
+                     $"{response.Insight.Confidence:F2}<{config.MinConfidence:F2}");
+                return;
+            }
+
             var envelope = new CognitiveInsightEnvelope(
                 CognitiveContract.Version,
                 frame.FrameId,
@@ -290,11 +343,24 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
                 _lastError = null;
             }
 
-            _onInsight(envelope);
+            _journal.Configure(config);
+            _journal.Append(envelope);
+            try
+            {
+                _onInsight(envelope);
+            }
+            catch (Exception ex)
+            {
+                _log($"LLM Cortex: наблюдение принято, но публикация внутреннего голоса не удалась: {ex.Message}");
+            }
             _log($"LLM НАБЛЮДЕНИЕ: frame={frame.FrameId} тик={frame.Tick} " +
                  $"риск={response.Insight.RiskLevel} уверенность={response.Insight.Confidence:F2} " +
                  $"время={response.Latency.TotalSeconds:F1}с возраст={frameAgeTicks}т" +
                  FormatMetrics(response.Metrics));
+            if (!string.IsNullOrWhiteSpace(response.Insight.InnerSpeech))
+                _log($"ВНУТРЕННИЙ ГОЛОС LLM: {response.Insight.InnerSpeech}");
+            if (!string.IsNullOrWhiteSpace(response.Insight.MemoryQuestion))
+                _log($"ВОПРОС К ПАМЯТИ LLM: {response.Insight.MemoryQuestion}");
         }
         catch (Exception ex)
         {
@@ -314,6 +380,9 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
     private CognitiveFrame BuildFrame(LifeStateDto state, long frameId, LlmConfig config)
     {
         var memory = SafeMemoryContext(config.MaxMemoryLines, config.MaxContextChars);
+        string previousInnerSpeech;
+        lock (_sync)
+            previousInnerSpeech = _lastInsight?.Insight.InnerSpeech ?? "";
         return new CognitiveFrame(
             CognitiveContract.Version,
             frameId,
@@ -328,7 +397,18 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
             state.LastDecision ?? "",
             FiniteOrZero(state.LastReward),
             ReadRecentEvents(state.RecentEvents, config.MaxRecentEvents, config.MaxContextChars),
-            memory);
+            memory)
+        {
+            Energy = FiniteOrZero(state.Homeostasis.Energy),
+            Fatigue = FiniteOrZero(state.Homeostasis.Fatigue),
+            ExplorationNeed = FiniteOrZero(state.Instincts.Exploration),
+            AttachmentNeed = FiniteOrZero(state.Instincts.Attachment),
+            AgencyNeed = FiniteOrZero(state.Instincts.Agency),
+            AttentionFocus = state.Attention?.Focus1 ?? "",
+            ActiveHabitId = state.Character?.ActiveHabitId ?? "",
+            HabitInfluence = FiniteOrZero(state.Character?.HabitInfluence ?? 0),
+            PreviousInnerSpeech = Abbreviate(previousInnerSpeech, config.MaxContextChars)
+        };
     }
 
     private IReadOnlyList<string> SafeMemoryContext(int maxLines, int maxChars)
@@ -365,6 +445,28 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
                 $"{(value.Consumed ? 1 : 0)}")
             .Select(value => Abbreviate(value, maxChars))
             .ToArray();
+    }
+
+    private string? ReadTransitionLocked(LifeStateDto state)
+    {
+        var scenario = state.Scenario?.Name ?? "unknown";
+        var mood = state.Affect.Mood ?? "unknown";
+        var drive = state.DominantDrive ?? "";
+
+        string? transition = null;
+        if (_lastPublishedScenario is null)
+            transition = "start";
+        else if (!string.Equals(scenario, _lastPublishedScenario, StringComparison.Ordinal))
+            transition = "scenario";
+        else if (!string.Equals(mood, _lastPublishedMood, StringComparison.Ordinal))
+            transition = "mood";
+        else if (!string.Equals(drive, _lastPublishedDrive, StringComparison.Ordinal))
+            transition = "drive";
+
+        _lastPublishedScenario = scenario;
+        _lastPublishedMood = mood;
+        _lastPublishedDrive = drive;
+        return transition;
     }
 
     private static string FormatMetrics(LlmGenerationMetrics? metrics)

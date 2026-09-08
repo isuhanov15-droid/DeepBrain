@@ -28,7 +28,8 @@ public sealed class OnlineTrainer
         if (tick % config.TrainEveryTicks != 0) return TrainOutcome.None;
         if (_buffer.Count < config.BatchSize || config.BatchSize <= 0) return TrainOutcome.None;
 
-        var steps = Math.Max(1, config.TrainStepsPerBatch);
+        if (config.TrainStepsPerBatch <= 0) return TrainOutcome.None;
+        var steps = config.TrainStepsPerBatch;
         var lossSum = 0.0;
         var didTrain = false;
         for (var i = 0; i < steps; i++)

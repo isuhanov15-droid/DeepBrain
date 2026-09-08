@@ -45,7 +45,7 @@ public sealed class LifeLoop
     private readonly ActionCooldowns _cooldowns = new();
     private readonly PersonalityProfile _personality = PersonalityProfile.LoadLada();
     private readonly VoiceModeResolver _voice = new();
-    private readonly HabitSystem _habits = new();
+    private readonly HabitSystem _habits;
     private readonly MessageDedupeGuard _dedupe = new();
     private readonly CalmBaselineEngine _calmBaseline = new();
     private readonly AppraisalEngine _appraisal = new();
@@ -53,15 +53,14 @@ public sealed class LifeLoop
     private readonly CurriculumManager _curriculum;
     private readonly ScenarioScorer _scenarioScorer = new();
     private readonly PolicyEvaluator _policyEvaluator;
+    private (float[] State, int Action, float Reward)? _pendingMlTransition;
     private readonly EpisodeReportWriter _reportWriter = new();
     private readonly IMlPolicyAdvisor _ml;
+    private readonly string _runId = Guid.NewGuid().ToString("N");
+    private readonly string _hostVersion = typeof(LifeLoop).Assembly.GetName().Version?.ToString(3) ?? "1.4.0";
     private readonly Dictionary<string, int> _actionCounts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _eventCounts = new(StringComparer.Ordinal);
-    private int _anxiousCount;
-    private int _calmCount;
-    private int _curiousCount;
-    private int _neutralCount;
-    private int _tenderCount;
+    private readonly MoodStatsWindow _moodStats = new();
     private int _statsTicks;
     private double _sumPain;
     private double _sumSafety;
@@ -110,6 +109,9 @@ public sealed class LifeLoop
     private MlPolicyDto? _mlTelemetry;
     private bool _mlCoreMissingLogged;
     private bool _mlLoaded;
+    private string? _activeHabitId;
+    private string _activeHabitCue = "none";
+    private double _activeHabitInfluence;
 
     private HomeostasisDto _homeo = new(0.7, 0.2, 0.3, 0.1, 0.7);
     private AffectDto _affect = new("calm", 0.2, 0.3);
@@ -142,7 +144,8 @@ public sealed class LifeLoop
         Action<LifeStateDto, CancellationToken> broadcast,
         Action<TraceDto, CancellationToken> trace,
         Action<LifeOutputDto, CancellationToken> output,
-        Action<string> log)
+        Action<string> log,
+        IMlPolicyAdvisor? mlAdvisor = null)
     {
         _world = world;
         _homeostasis = homeostasis;
@@ -159,12 +162,14 @@ public sealed class LifeLoop
         _output = output;
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
+        _habits = new HabitSystem(_log);
+        _habits.Configure(cfg.Habits ?? HabitConfig.Default);
         _longTermMemory = new PersistentEpisodicMemory(_log);
         _longTermMemory.Configure(cfg.Memory ?? MemoryConfig.Default);
         _episode = new EpisodeManager(cfg.Episode.MaxSteps);
         _curriculum = new CurriculumManager(cfg.Ml.Seed);
         _policyEvaluator = new PolicyEvaluator(_scenarioScorer);
-        _ml = MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
+        _ml = mlAdvisor ?? MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
     }
 
     public void Start() => _running = true;
@@ -174,6 +179,7 @@ public sealed class LifeLoop
     {
         var (cfg, _) = _configLoader.GetCurrent();
         var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
+        _pendingMlTransition = null;
         _ml.Reset(mlCfg);
         _ml.ResetCounters();
         _mlLoaded = true;
@@ -240,6 +246,55 @@ public sealed class LifeLoop
 
     public bool TryConnectMl() => _ml.TryConnectRemote();
     public void DisconnectMl() => _ml.DisconnectRemote();
+    public string RunId => _runId;
+
+    public string GetHabitStatus()
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _habits.Configure(config.Habits ?? HabitConfig.Default);
+        var status = _habits.GetStatus();
+        return $"включены={RussianDisplay.YesNo(status.Enabled)} " +
+               $"загружены={RussianDisplay.YesNo(status.Loaded)} " +
+               $"импорт v1.3={RussianDisplay.YesNo(status.ImportedLegacySnapshot)} " +
+               $"привычек={status.HabitCount} часы привычек={status.ClockTick} несохранённых обновлений={status.DirtyUpdates} " +
+               $"сохранений={status.SaveCount} последняя запись={status.LastSavedAt?.ToString("O") ?? "нет"} " +
+               $"ошибка={status.LastError ?? "нет"} путь={status.Path}";
+    }
+
+    public IReadOnlyList<string> GetHabitStatsLines()
+    {
+        var (config, _) = _configLoader.GetCurrent();
+        _habits.Configure(config.Habits ?? HabitConfig.Default);
+        _habits.AdvanceTime(_tick);
+        return _habits.GetTopHabits(20).Select(FormatHabitLine).ToList();
+    }
+
+    public IReadOnlyList<string> ExplainHabitLines(string? idOrCue)
+    {
+        if (string.IsNullOrWhiteSpace(idOrCue))
+            return GetHabitStatsLines();
+        var habit = _habits.GetHabit(idOrCue);
+        return habit is null
+            ? new[] { $"привычка не найдена: {idOrCue}" }
+            : new[] { FormatHabitLine(habit) };
+    }
+
+    public string GetCharacterStatus()
+    {
+        return $"персона={_personality.Persona.PersonaId} " +
+               $"активный сигнал={RussianDisplay.Token(_activeHabitCue)} " +
+               $"активная привычка={RussianDisplay.Token(_activeHabitId ?? "нет")} " +
+               $"влияние={_activeHabitInfluence:0.000}; {GetHabitStatus()}";
+    }
+
+    public void FlushPersistentState()
+    {
+        _habits.Flush();
+        _reportWriter.CompleteAsync().GetAwaiter().GetResult();
+        var (cfg, _) = _configLoader.GetCurrent();
+        if (_mlLoaded && (cfg.Ml.Enable || cfg.UseMlAdvisor))
+            _ml.TrySave(cfg.Ml.CheckpointPath, _episode.EpisodeId);
+    }
 
     public string GetMemoryStatus()
     {
@@ -438,6 +493,8 @@ public sealed class LifeLoop
         var evalCfg = config.Evaluation ?? BrainConfig.Default.Evaluation;
         var memoryCfg = config.Memory ?? MemoryConfig.Default;
         _longTermMemory.Configure(memoryCfg);
+        _habits.Configure(config.Habits ?? HabitConfig.Default);
+        _habits.AdvanceTime(_tick);
         var scenarioCfg = config.Scenarios ?? BrainConfig.Default.Scenarios;
         var rewardWeights = config.RewardWeights ?? BrainConfig.Default.RewardWeights ?? new RewardWeightsConfig(1.0, 1.0, 1.0, 0.05, 0.05);
         if (!string.IsNullOrWhiteSpace(_curriculumModeOverride))
@@ -503,10 +560,15 @@ public sealed class LifeLoop
                 _episode.SetEpisodeId(loadedEpisodeId);
                 _log($"Политика ML загружена: {mlConfig.CheckpointPath}");
             }
+            else if (File.Exists(mlConfig.CheckpointPath))
+                throw new IOException("Existing ML checkpoint could not be restored; refusing fresh initialization: " + mlConfig.CheckpointPath);
             _mlLoaded = true;
         }
         if (mlConfig.Enable && _tick > 0 && _tick % 500 == 0)
-            _ml.TrySave(mlConfig.CheckpointPath, _episode.EpisodeId);
+        {
+            try { _ml.TrySave(mlConfig.CheckpointPath, _episode.EpisodeId); }
+            catch (Exception ex) { _log("ML checkpoint save failed: " + ex.Message); }
+        }
 
         _clock.Tick(dtSeconds, _sleep.IsSleeping);
         _sleep.Update(_clock, ref _homeo, ref _affect);
@@ -662,6 +724,9 @@ public sealed class LifeLoop
         habitInfluence = Math.Min(0.4, habitInfluence);
         if (_loop.LoopPenalty > 0.4)
             habitInfluence *= 0.7;
+        _activeHabitCue = cueKey;
+        _activeHabitId = habitId;
+        _activeHabitInfluence = habitInfluence;
         var voiceMode = _voice.Resolve(_personality.Persona, _affect, instincts, circ);
         var isAnxious = _affect.Mood == "anxious" || instincts.SelfPreservation > 0.8;
         var emitCooldown = ComputeEmitCooldownTicks(voiceMode, _personality.Persona.AttachmentBaseline, isAnxious, config.Actions);
@@ -773,6 +838,13 @@ public sealed class LifeLoop
             ))
             : Array.Empty<float>();
 
+        // Complete the previous action with the actual next decision state and
+        // exactly the same mask used for inference (including candidate filtering).
+        if (trainEnabled && _pendingMlTransition is { } previous)
+            _ml.Observe(previous.State, previous.Action, previous.Reward, stateVec,
+                false, decisionMask, mlConfigEffective, _tick);
+        _pendingMlTransition = null;
+
         var decision = _ml.SelectAction(stateVec, heuristicScores, allowedActions, decisionMask, mlConfigEffective, _tick);
         var chosen = candidates.FirstOrDefault(c => c.Action.Name == decision.ActionName) ?? ActionSelector.PickBest(candidates);
         var action = chosen.Action;
@@ -832,36 +904,12 @@ public sealed class LifeLoop
 
         if (trainEnabled && stateVec.Length > 0)
         {
-            var nextInstincts = _instincts.Compute(_homeo, _world, config.Drives);
-            var nextRecentEvents = _world.Events.GetRecent(5);
-            var nextAppraisal = _appraisal.Compute(_homeo, nextInstincts, _world, circ, nextRecentEvents);
-            var nextVec = _ml.Encode(new StateVectorInput(
-                _homeo,
-                nextInstincts,
-                _affect,
-                moodInertia,
-                circ,
-                new ClimateDto(_world.CalmLevel, _world.StressLevel, _world.Tension, _world.BaselineTension),
-                attention,
-                _loop.LoopPenalty,
-                _loop.AvgRewardShort,
-                _personality.Persona,
-                habitInfluence,
-                nextRecentEvents.FirstOrDefault()?.Salience ?? 0,
-                nextAppraisal
-            ));
             var actionIdx = ActionCatalog.IndexOf(action.Name);
-            var nextMask = _masker.BuildMask(
-                _homeo,
-                _affect,
-                _cooldowns,
-                _tick + 1,
-                emitCooldown,
-                config.Actions,
-                _loop.IsLoopDetected,
-                episodeConfig.PanicSafetyMin);
-            var done = resetReason != "none";
-            _ml.Observe(stateVec, actionIdx, (float)rewardDto.Total, nextVec, done, nextMask, mlConfigEffective, _tick);
+            if (resetReason != "none")
+                _ml.Observe(stateVec, actionIdx, (float)rewardDto.Total, stateVec,
+                    true, new float[ActionCatalog.Count], mlConfigEffective, _tick);
+            else
+                _pendingMlTransition = (stateVec, actionIdx, (float)rewardDto.Total);
         }
 
         if (action.Name == "loop_break")
@@ -1169,10 +1217,14 @@ public sealed class LifeLoop
             _calmWindowOpen = true;
 
         var habitUpdated = _habits.UpdateAfter(action.Name, rewardDto.Total, cueKey, _tick);
-        if (habitUpdated is not null)
+        if (habitUpdated is not null && habitUpdated.LastExecutionTick == _tick)
             _log($"ОБУЧЕНИЕ ПРИВЫЧКИ: {RussianDisplay.Token(cueKey)} → " +
                  $"{RussianDisplay.Token(habitUpdated.Id)} сила={habitUpdated.Strength:0.00} " +
-                 $"средняя награда={habitUpdated.AvgReward:0.000}");
+                 $"выполнений={habitUpdated.RoutineExecutions} " +
+                 $"преимущество={habitUpdated.AdvantageAverage:+0.000;-0.000;0.000} " +
+                 $"награда действия={habitUpdated.RoutineRewardAverage:0.000}");
+        if (resetReason != "none")
+            _habits.Flush();
 
         if (_tick > 0 && _tick % 200 == 0)
             EmitStats();
@@ -1377,6 +1429,7 @@ public sealed class LifeLoop
         _world.ResetEpisode();
         ResetEpisodeMetrics();
         _episodeStartTs = DateTimeOffset.Now;
+        _moodStats.Clear();
         _statsTicks = 0;
         _sumPain = 0;
         _sumSafety = 0;
@@ -1405,11 +1458,7 @@ public sealed class LifeLoop
     private void UpdateStats(string actionName, string mood, HomeostasisDto homeo, AttentionDto attention, double reward)
     {
         _statsTicks++;
-        if (mood == "anxious") _anxiousCount++;
-        if (mood == "calm") _calmCount++;
-        if (mood == "curious") _curiousCount++;
-        if (mood == "neutral") _neutralCount++;
-        if (mood == "tender") _tenderCount++;
+        _moodStats.Add(mood);
 
         _sumPain += homeo.Pain;
         _sumSafety += homeo.Safety;
@@ -1542,7 +1591,11 @@ public sealed class LifeLoop
             ActionRewardAverages = _episodeActionRewardSums.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value / Math.Max(1, _episodeActionCounts.TryGetValue(pair.Key, out var count) ? count : 1),
-                StringComparer.Ordinal)
+                StringComparer.Ordinal),
+            ReportSchemaVersion = 3,
+            RunId = _runId,
+            HostVersion = _hostVersion,
+            ConfigVersion = _configVersion
         };
 
         var score = _scenarioScorer.Score(scenarioName, report);
@@ -1580,6 +1633,18 @@ public sealed class LifeLoop
                $"петля={FormatSigned(reward.LoopPenalty)} " +
                $"недоп={FormatSigned(reward.InvalidActionPenalty)} " +
                $"терминал={FormatSigned(reward.TerminalPenalty)}";
+    }
+
+    private static string FormatHabitLine(HabitDto habit)
+    {
+        return $"id={RussianDisplay.Token(habit.Id)} сигнал={RussianDisplay.Token(habit.CueKey)} " +
+               $"действие={RussianDisplay.Token(habit.RoutineAction)} сила={habit.Strength:0.000} " +
+               $"сигналов={habit.CueExposures} выполнений={habit.RoutineExecutions} " +
+               $"подкреплений=+{habit.PositiveReinforcements}/-{habit.NegativeReinforcements} " +
+               $"фон сигнала={habit.CueRewardBaseline:0.000} " +
+               $"награда действия={habit.RoutineRewardAverage:0.000} " +
+               $"преимущество={habit.AdvantageAverage:+0.000;-0.000;0.000} " +
+               $"импорт v1.3={RussianDisplay.YesNo(habit.ImportedLegacy)}";
     }
 
     private static string NormalizeDecisionReason(string reason, bool maskFallback)
@@ -1625,22 +1690,21 @@ public sealed class LifeLoop
     private LifeStatsDto BuildStatsSnapshot()
     {
         if (_statsTicks == 0) return _statsSnapshot;
-        var anxiousPct = _anxiousCount / (double)_statsTicks;
-        var calmPct = _calmCount / (double)_statsTicks;
-        var curiousPct = _curiousCount / (double)_statsTicks;
-        var p95Pain = ComputeP95(_painSamples);
-        return new LifeStatsDto(anxiousPct, calmPct, curiousPct, p95Pain);
+        return _moodStats.Snapshot(ComputeP95(_painSamples));
     }
 
     private void EmitStats()
     {
         if (_statsTicks == 0) return;
 
-        var anxiousPct = _anxiousCount / (double)_statsTicks;
-        var calmPct = _calmCount / (double)_statsTicks;
-        var curiousPct = _curiousCount / (double)_statsTicks;
-        var neutralPct = _neutralCount / (double)_statsTicks;
-        var tenderPct = _tenderCount / (double)_statsTicks;
+        var anxiousPct = _moodStats.Share("anxious");
+        var calmPct = _moodStats.Share("calm");
+        var curiousPct = _moodStats.Share("curious");
+        var neutralPct = _moodStats.Share("neutral");
+        var tenderPct = _moodStats.Share("tender");
+        var lowPct = _moodStats.Share("low");
+        var frustratedPct = _moodStats.Share("frustrated");
+        var otherPct = _moodStats.Share("other");
         var avgPain = _sumPain / _statsTicks;
         var avgSafety = _sumSafety / _statsTicks;
         var avgArousal = _sumArousal / _statsTicks;
@@ -1664,6 +1728,7 @@ public sealed class LifeLoop
 
         _log($"СТАТИСТИКА(200): тревога={anxiousPct:0.00} спокойствие={calmPct:0.00} " +
              $"любопытство={curiousPct:0.00} нейтральное={neutralPct:0.00} мягкое={tenderPct:0.00} " +
+             $"сниженное={lowPct:0.00} фрустрация={frustratedPct:0.00} другое={otherPct:0.00} " +
              $"средняя боль={avgPain:0.00} боль p95={p95Pain:0.00} " +
              $"средняя безопасность={avgSafety:0.00} среднее возбуждение={avgArousal:0.00}");
         _log($"СТАТИСТИКА климата: средняя угроза={avgThreat:0.00} " +
@@ -1683,11 +1748,7 @@ public sealed class LifeLoop
                  $"источник={RussianDisplay.Token(_mlTelemetry.PolicySource)}");
         }
 
-        _anxiousCount = 0;
-        _calmCount = 0;
-        _curiousCount = 0;
-        _neutralCount = 0;
-        _tenderCount = 0;
+        _moodStats.Clear();
         _statsTicks = 0;
         _sumPain = 0;
         _sumSafety = 0;

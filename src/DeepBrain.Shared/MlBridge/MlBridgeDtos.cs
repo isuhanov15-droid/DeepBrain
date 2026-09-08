@@ -8,7 +8,11 @@ public sealed record MlInferRequest(
     bool[]? ActionMask,
     int InputDim,
     int ActionCount
-);
+)
+{
+    public int? Seed { get; init; }
+    public double? LearningRate { get; init; }
+}
 
 public sealed record MlInferResponse(
     int ActionIndex,
@@ -16,7 +20,12 @@ public sealed record MlInferResponse(
     float[]? Probabilities,
     double Entropy,
     double AvgQ
-);
+)
+{
+    public string? ServerInstance { get; init; }
+    public bool Ok { get; init; } = true;
+    public string? Reason { get; init; }
+}
 
 public sealed record MlTransitionDto(
     float[] State,
@@ -45,7 +54,7 @@ public sealed record MlTrainRequest(
     MlTrainConfigDto Config,
     int InputDim,
     int ActionCount
-);
+) { public string? ExpectedInstanceId { get; init; } }
 
 public sealed record MlTrainResponse(
     bool Ok,
@@ -57,10 +66,12 @@ public sealed record MlTrainResponse(
     string? Reason
 );
 
-public sealed record MlCheckpointRequest(string Path);
+public sealed record MlCheckpointRequest(string Path) { public string? ExpectedInstanceId { get; init; } }
 
 public sealed record MlCheckpointResponse(bool Ok, string? Meta);
 
 public sealed record MlPingRequest(string? Client);
 
 public sealed record MlPingResponse(string Status);
+
+public sealed record MlResetRequest(int Seed, double LearningRate);

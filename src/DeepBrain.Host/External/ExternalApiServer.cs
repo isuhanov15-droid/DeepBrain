@@ -23,6 +23,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
     private readonly LlmCortexOrchestrator _cortex;
     private readonly Func<string> _mlStatusProvider;
     private readonly Func<string> _memoryStatusProvider;
+    private readonly Func<string> _habitsStatusProvider;
     private readonly Action<string> _log;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -39,6 +40,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
         LlmCortexOrchestrator cortex,
         Func<string> mlStatusProvider,
         Func<string> memoryStatusProvider,
+        Func<string> habitsStatusProvider,
         Action<string> log)
     {
         _configProvider = configProvider;
@@ -46,6 +48,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
         _cortex = cortex;
         _mlStatusProvider = mlStatusProvider;
         _memoryStatusProvider = memoryStatusProvider;
+        _habitsStatusProvider = habitsStatusProvider;
         _log = log;
     }
 
@@ -286,6 +289,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
                     "GET /api/v1/system/status",
                     "GET /api/v1/llm/status",
                     "GET /api/v1/llm/last",
+                    "GET /api/v1/llm/journal",
                     "POST /api/v1/llm/observe",
                     "GET /api/v1/events"
                 },
@@ -316,6 +320,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
             {
                 ml = _mlStatusProvider(),
                 memory = _memoryStatusProvider(),
+                habits = _habitsStatusProvider(),
                 llm = _cortex.GetStatus(),
                 api = GetStatus()
             }, cancellationToken).ConfigureAwait(false);
@@ -332,6 +337,16 @@ public sealed class ExternalApiServer : IAsyncDisposable
         if (path == "/api/v1/llm/last" && IsMethod(context, "GET"))
         {
             await WriteOptionalAsync(context.Response, _cortex.GetLastInsight(), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (path == "/api/v1/llm/journal" && IsMethod(context, "GET"))
+        {
+            var count = int.TryParse(context.Request.QueryString["count"], out var parsed)
+                ? Math.Clamp(parsed, 1, 100)
+                : 20;
+            await WriteJsonAsync(context.Response, HttpStatusCode.OK, _cortex.GetRecentJournal(count), cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 

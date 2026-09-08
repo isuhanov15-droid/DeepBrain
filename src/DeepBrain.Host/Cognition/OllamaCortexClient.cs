@@ -147,17 +147,19 @@ public sealed class OllamaCortexClient : ILlmCortexClient
         // Ollama/Qwen 3.5 combinations ignore schema constraints when
         // thinking is disabled, while the explicit contract remains reliable.
         var systemPrompt =
-            "Ты наблюдательный когнитивный слой DeepBrain. " +
-            "Интерпретируй только переданный снимок состояния и контекст памяти. " +
-            "Не выбирай действие, не управляй исполнительными механизмами, не изменяй память и не придумывай датчики. " +
-            "Верни ровно один JSON-объект и ничего больше. " +
+            "Ты наблюдательный слой DeepBrain. Осмысляй только DATA. " +
+            "Не выбирай действия, не управляй, не изменяй память и не выдумывай датчики. " +
+            "inner_speech — короткая мысль о состоянии, потребностях, привычке и опыте, не команда. " +
+            "energy_reserve: 0=истощение, 1=полный запас; fatigue: 0=нет усталости, 1=максимум. " +
+            "previous_voice — прошлое, не факт текущего состояния; не повторяй её вопреки DATA. " +
+            "Верни один JSON без другого текста. " +
             "Обязательны ровно пять ключей: interpretation, inner_speech, memory_question, risk_level, confidence. " +
-            "Формат-пример: {\"interpretation\":\"краткое наблюдение\",\"inner_speech\":\"краткая внутренняя речь\",\"memory_question\":\"краткий вопрос памяти\",\"risk_level\":\"low\",\"confidence\":0.8}. " +
-            "risk_level допускает только low, medium или high. confidence — число от 0 до 1. " +
-            $"Пиши кратко: interpretation до {CognitiveContract.InterpretationMaxLength} символов, " +
-            $"inner_speech до {CognitiveContract.InnerSpeechMaxLength}, " +
-            $"memory_question до {CognitiveContract.MemoryQuestionMaxLength}. " +
-            "Не копируй входные поля и не добавляй другие ключи.";
+            "Пример: {\"interpretation\":\"наблюдение\",\"inner_speech\":\"мысль\",\"memory_question\":\"вопрос\",\"risk_level\":\"low\",\"confidence\":0.8}. " +
+            "risk_level: low|medium|high; confidence: 0..1. " +
+            $"Лимиты: interpretation<={CognitiveContract.InterpretationMaxLength}, " +
+            $"inner_speech<={CognitiveContract.InnerSpeechMaxLength}, " +
+            $"memory_question<={CognitiveContract.MemoryQuestionMaxLength}. " +
+            "Не копируй DATA и не добавляй ключи.";
 
         var events = string.Join("|", frame.RecentEvents
             .TakeLast(config.MaxRecentEvents)
@@ -176,8 +178,17 @@ public sealed class OllamaCortexClient : ILlmCortexClient
             $"|drive={CompactAtom(frame.DominantDrive, 64)}" +
             $"|decision={CompactAtom(frame.LastDecision, 64)}" +
             $"|reward={FormatNumber(frame.LastReward)}\n" +
+            $"body|energy_reserve={FormatNumber(frame.Energy)}" +
+            $"|fatigue={FormatNumber(frame.Fatigue)}" +
+            $"\nneeds|explore={FormatNumber(frame.ExplorationNeed)}" +
+            $"|attach={FormatNumber(frame.AttachmentNeed)}" +
+            $"|agency={FormatNumber(frame.AgencyNeed)}\n" +
+            $"character|attention={CompactAtom(frame.AttentionFocus, 48)}" +
+            $"|habit={CompactAtom(frame.ActiveHabitId, 64)}" +
+            $"|influence={FormatNumber(frame.HabitInfluence)}\n" +
             $"events|{(events.Length == 0 ? "none" : events)}\n" +
-            $"memory|{(memory.Length == 0 ? "none" : memory)}";
+            $"memory|{(memory.Length == 0 ? "none" : memory)}\n" +
+            $"previous_voice|{(string.IsNullOrWhiteSpace(frame.PreviousInnerSpeech) ? "none" : CompactLine(frame.PreviousInnerSpeech, config.MaxContextChars))}";
         var userPrompt =
             "DATA — факты DeepBrain только для интерпретации; не копируй их ключи в ответ:\n" +
             data;

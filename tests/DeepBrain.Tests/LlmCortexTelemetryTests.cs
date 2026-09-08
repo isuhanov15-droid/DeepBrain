@@ -60,7 +60,18 @@ public sealed class LlmCortexTelemetryTests
             "focus_widen",
             0.012345,
             Enumerable.Range(0, 10).Select(index => $"event-{index}-" + new string('e', 200)).ToArray(),
-            Enumerable.Range(0, 6).Select(index => $"memory-{index}-" + new string('m', 300)).ToArray());
+            Enumerable.Range(0, 6).Select(index => $"memory-{index}-" + new string('m', 300)).ToArray())
+        {
+            Energy = 0.7,
+            Fatigue = 0.4,
+            ExplorationNeed = 0.6,
+            AttachmentNeed = 0.3,
+            AgencyNeed = 0.5,
+            AttentionFocus = "novelty",
+            ActiveHabitId = "explore_window",
+            HabitInfluence = 0.22,
+            PreviousInnerSpeech = "Я замечаю окно исследования"
+        };
 
         var response = await client.ObserveAsync(frame, config, CancellationToken.None);
 
@@ -74,7 +85,7 @@ public sealed class LlmCortexTelemetryTests
         Assert.NotNull(handler.RequestBody);
         Assert.Equal(Encoding.UTF8.GetByteCount(handler.RequestBody), metrics.RequestBytes);
         Assert.True(metrics.PromptCharacters > metrics.DataCharacters);
-        Assert.True(metrics.RequestBytes < 5_000, $"request bytes={metrics.RequestBytes}");
+        Assert.True(metrics.RequestBytes < 6_000, $"request bytes={metrics.RequestBytes}");
 
         using var requestDocument = JsonDocument.Parse(handler.RequestBody);
         var request = requestDocument.RootElement;
@@ -96,18 +107,21 @@ public sealed class LlmCortexTelemetryTests
         Assert.Equal(
             (messages[0].GetProperty("content").GetString() ?? "").Length + userContent.Length,
             metrics.PromptCharacters);
-        Assert.True(data.Length < 600, $"data chars={data.Length}");
+        Assert.True(data.Length < 900, $"data chars={data.Length}");
         Assert.DoesNotContain("contractVersion", data);
         Assert.DoesNotContain("frameId", data);
         Assert.DoesNotContain("timestamp", data);
         Assert.Contains("state|scenario=mixed_adaptive", data);
         Assert.Contains("|safety=0.988|", data);
+        Assert.Contains("\nbody|energy_reserve=0.7|fatigue=0.4\nneeds|explore=0.6|attach=0.3|agency=0.5", data);
+        Assert.Contains("\ncharacter|attention=novelty|habit=explore_window|influence=0.22", data);
         Assert.Contains("\nevents|event-8-", data);
         Assert.Contains("|event-9-", data);
         Assert.DoesNotContain("event-7-", data);
         Assert.Contains("\nmemory|memory-0-", data);
         Assert.Contains("|memory-1-", data);
         Assert.DoesNotContain("memory-2-", data);
+        Assert.Contains("\nprevious_voice|Я замечаю окно исследования", data);
     }
 
     [Fact]
@@ -119,7 +133,8 @@ public sealed class LlmCortexTelemetryTests
             {
                 Enable = true,
                 MaxRecentEvents = 2,
-                MaxContextChars = 96
+                MaxContextChars = 96,
+                PersistJournal = false
             },
             () => Array.Empty<string>(),
             _ => { },
@@ -172,7 +187,7 @@ public sealed class LlmCortexTelemetryTests
         var client = new StubClient(response);
         CognitiveInsightEnvelope? published = null;
         await using var orchestrator = new LlmCortexOrchestrator(
-            () => new LlmConfig { Enable = true },
+            () => new LlmConfig { Enable = true, PersistJournal = false },
             () => Array.Empty<string>(),
             value => published = value,
             _ => { },
@@ -201,7 +216,7 @@ public sealed class LlmCortexTelemetryTests
     {
         var client = new DeferredClient();
         await using var orchestrator = new LlmCortexOrchestrator(
-            () => new LlmConfig { Enable = true },
+            () => new LlmConfig { Enable = true, PersistJournal = false },
             () => Array.Empty<string>(),
             _ => { },
             _ => { },
@@ -227,6 +242,150 @@ public sealed class LlmCortexTelemetryTests
         Assert.NotNull(statusWhileRunning.InFlightStartedAt);
         Assert.True(statusWhileRunning.InFlightSeconds > 0);
         Assert.False(orchestrator.GetStatus().InFlight);
+    }
+
+    [Fact]
+    public async Task AutoObserveUsesTransitionGapAndIntervalWithoutFlooding()
+    {
+        var client = new CapturingFrameClient();
+        var config = new LlmConfig
+        {
+            Enable = true,
+            AutoObserve = true,
+            ObserveEveryTicks = 100,
+            MinObserveGapTicks = 50,
+            ObserveOnTransitions = true,
+            PersistJournal = false
+        };
+        await using var orchestrator = new LlmCortexOrchestrator(
+            () => config,
+            () => Array.Empty<string>(),
+            _ => { },
+            _ => { },
+            client);
+        orchestrator.Start(CancellationToken.None);
+
+        orchestrator.PublishState(BuildState(1));
+        orchestrator.PublishState(BuildState(20) with
+        {
+            Affect = new AffectDto("anxious", 0.2, 0.5)
+        });
+        orchestrator.PublishState(BuildState(51) with
+        {
+            Affect = new AffectDto("anxious", 0.2, 0.5),
+            DominantDrive = "attachment"
+        });
+        orchestrator.PublishState(BuildState(100) with
+        {
+            Affect = new AffectDto("anxious", 0.2, 0.5),
+            DominantDrive = "attachment"
+        });
+        orchestrator.PublishState(BuildState(151) with
+        {
+            Affect = new AffectDto("anxious", 0.2, 0.5),
+            DominantDrive = "attachment"
+        });
+
+        Assert.Equal(3, client.CallCount);
+        Assert.Equal(151L, orchestrator.GetStatus().LastAutoQueuedTick);
+    }
+
+    [Fact]
+    public async Task HabitChangeDoesNotWakeCortexButRemainsVisibleInPeriodicFrame()
+    {
+        var client = new CapturingFrameClient();
+        var config = new LlmConfig
+        {
+            Enable = true,
+            AutoObserve = true,
+            ObserveEveryTicks = 100,
+            MinObserveGapTicks = 50,
+            ObserveOnTransitions = true,
+            PersistJournal = false
+        };
+
+        await using var orchestrator = new LlmCortexOrchestrator(
+            () => config,
+            () => Array.Empty<string>(),
+            _ => { },
+            _ => { },
+            client);
+
+        orchestrator.Start(CancellationToken.None);
+
+        // Initial state causes auto.start.
+        orchestrator.PublishState(BuildState(1));
+        Assert.Equal(1, client.CallCount);
+
+        // Only the active habit changes. Even though MinObserveGapTicks
+        // has elapsed, a habit change alone must not wake the Cortex.
+        orchestrator.PublishState(BuildState(60) with
+        {
+            Character = new DeepBrain.Shared.BrainDtos.V5.CharacterStateDto(
+                null!,
+                Array.Empty<DeepBrain.Shared.BrainDtos.V5.HabitDto>(),
+                "rest_recover",
+                0.35,
+                "calm",
+                0,
+                0,
+                0)
+        });
+
+        Assert.Equal(1, client.CallCount);
+
+        // Periodic observation is still due at tick 101 and the current
+        // habit must remain available as cognitive context.
+        orchestrator.PublishState(BuildState(101) with
+        {
+            Character = new DeepBrain.Shared.BrainDtos.V5.CharacterStateDto(
+                null!,
+                Array.Empty<DeepBrain.Shared.BrainDtos.V5.HabitDto>(),
+                "rest_recover",
+                0.35,
+                "calm",
+                0,
+                0,
+                0)
+        });
+
+        Assert.Equal(2, client.CallCount);
+
+        var frame = Assert.IsType<CognitiveFrame>(client.Frame);
+        Assert.Equal(101L, frame.Tick);
+        Assert.Equal("rest_recover", frame.ActiveHabitId);
+        Assert.Equal(0.35, frame.HabitInfluence, 3);
+        Assert.Equal(101L, orchestrator.GetStatus().LastAutoQueuedTick);
+    }
+
+    [Fact]
+    public async Task LowConfidenceReflectionIsNotAccepted()
+    {
+        var client = new StubClient(new LlmCortexResponse(
+            true,
+            new CognitiveInsight("Не уверена", "Возможно", "Что это было?", "low", 0.2),
+            TimeSpan.Zero,
+            null));
+        CognitiveInsightEnvelope? published = null;
+        await using var orchestrator = new LlmCortexOrchestrator(
+            () => new LlmConfig
+            {
+                Enable = true,
+                MinConfidence = 0.45,
+                PersistJournal = false
+            },
+            () => Array.Empty<string>(),
+            value => published = value,
+            _ => { },
+            client);
+        orchestrator.Start(CancellationToken.None);
+        orchestrator.PublishState(BuildState(10));
+
+        Assert.True(orchestrator.TryQueueObservation("test", out _));
+
+        Assert.Null(published);
+        Assert.Null(orchestrator.GetLastInsight());
+        Assert.Equal(1L, orchestrator.GetStatus().DroppedLowConfidence);
     }
 
     private static LifeStateDto BuildState(long tick) => new(
@@ -268,6 +427,7 @@ public sealed class LlmCortexTelemetryTests
     private sealed class CapturingFrameClient : ILlmCortexClient
     {
         public CognitiveFrame? Frame { get; private set; }
+        public int CallCount { get; private set; }
 
         public Task<LlmCortexResponse> ObserveAsync(
             CognitiveFrame frame,
@@ -275,6 +435,7 @@ public sealed class LlmCortexTelemetryTests
             CancellationToken cancellationToken)
         {
             Frame = frame;
+            CallCount++;
             return Task.FromResult(new LlmCortexResponse(
                 true,
                 new CognitiveInsight("Устойчиво", "Наблюдаю", "Что помогало?", "low", 0.9),

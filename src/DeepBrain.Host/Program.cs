@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.IO;
 using DeepBrain.Host.Brain;
 using DeepBrain.Host.Brain.Input;
@@ -66,7 +66,20 @@ var externalEvents = new ExternalEventHub();
 var cortex = new LlmCortexOrchestrator(
     () => configLoader.GetCurrent().Config.Llm ?? LlmConfig.Default,
     () => lifeLoop?.GetCortexMemoryLines() ?? Array.Empty<string>(),
-    insight => externalEvents.PublishInsight(insight),
+    insight =>
+    {
+        externalEvents.PublishInsight(insight);
+        if (string.IsNullOrWhiteSpace(insight.Insight.InnerSpeech))
+            return;
+
+        var innerVoice = new LifeOutputDto(
+            insight.AcceptedAtTick,
+            insight.CreatedAt,
+            insight.Insight.InnerSpeech,
+            "llm_inner_voice");
+        externalEvents.PublishOutput(innerVoice);
+        server.BroadcastLifeOutputAsync(innerVoice, CancellationToken.None).GetAwaiter().GetResult();
+    },
     msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 var externalApi = new ExternalApiServer(
     () => configLoader.GetCurrent().Config.ExternalApi ?? ExternalApiConfig.Default,
@@ -74,12 +87,13 @@ var externalApi = new ExternalApiServer(
     cortex,
     () => lifeLoop?.GetMlStatus() ?? "ML недоступен",
     () => lifeLoop?.GetMemoryStatus() ?? "Память недоступна",
+    () => lifeLoop?.GetHabitStatus() ?? "Привычки недоступны",
     msg => LogLine(consoleLock, logBuffer, logWriter, msg));
 var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
 LogLine(consoleLock, logBuffer, logWriter,
     mlCoreAvailable
         ? "ML.Core: найден"
-        : "ML.Core: не найден, параметр ml.enable будет принудительно отключён");
+        : "ML.Core: локальное ядро не найдено; доступность ML определяется выбранным backend");
 lifeLoop = new LifeLoop(
     new WorldSim(seed: 1337),
     new HomeostasisEngine(),
@@ -123,8 +137,9 @@ lifeLoop = new LifeLoop(
 
 try
 {
-    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.3.0";
-    LogLine(consoleLock, logBuffer, logWriter, $"Запуск DeepBrain.Host v{hostVersion}...");
+    var hostVersion = typeof(BrainEngine).Assembly.GetName().Version?.ToString(3) ?? "1.4.0";
+    LogLine(consoleLock, logBuffer, logWriter,
+        $"Запуск DeepBrain.Host v{hostVersion}, runId={lifeLoop?.RunId ?? "нет"}...");
 
     await server.StartAsync(cts.Token);
     cortex.Start(cts.Token);
@@ -150,16 +165,25 @@ try
             "Командная строка отключена: стандартный ввод работает не в интерактивном режиме");
     }
 
+    await Task.WhenAny(heartbeatTask, brainTask);
+    cts.Cancel();
     await Task.WhenAll(heartbeatTask, brainTask);
 }
 catch (OperationCanceledException) { }
 catch (Exception ex)
 {
+    Environment.ExitCode = 1;
     LogLine(consoleLock, logBuffer, logWriter, "=== КРИТИЧЕСКАЯ ОШИБКА ОСНОВНОГО ЦИКЛА ===");
     LogLine(consoleLock, logBuffer, logWriter, ex.ToString());
 }
 finally
 {
+    try { lifeLoop?.FlushPersistentState(); }
+    catch (Exception ex)
+    {
+        Environment.ExitCode = 1;
+        LogLine(consoleLock, logBuffer, logWriter, "ОШИБКА СОХРАНЕНИЯ ПРИ ОСТАНОВКЕ: " + ex);
+    }
     logWriter.Flush();
     traceWriter.Flush();
     await externalApi.DisposeAsync();
@@ -257,7 +281,8 @@ static void RunCommandLoop(
         "mlstatus, mlconnect, mldisconnect, ml.mode, scenario.list, scenario.set, " +
         "curriculum.mode, curriculum.next, memory.status, memory.recent, memory.search, " +
         "memory.explain, memory.stats, memory.consolidate, " +
-        "llm.status, llm.observe, llm.last, api.status, " +
+        "habit.status, habit.stats, habit.explain, character.status, " +
+        "llm.status, llm.observe, llm.last, llm.journal, api.status, " +
         "reloadconfig, death, exit");
     while (!cts.IsCancellationRequested)
     {
@@ -427,6 +452,24 @@ static void RunCommandLoop(
                     LogLine(consoleLockProvider(), logBuffer, logWriter,
                         $"КОНСОЛИДАЦИЯ ПАМЯТИ: {lifeLoop.ConsolidateMemory()}");
                 break;
+            case "habit.status":
+                if (lifeLoop is not null)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        $"ПРИВЫЧКИ: {lifeLoop.GetHabitStatus()}");
+                break;
+            case "habit.stats":
+                foreach (var habitLine in lifeLoop?.GetHabitStatsLines() ?? Array.Empty<string>())
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"ПРИВЫЧКА: {habitLine}");
+                break;
+            case "habit.explain":
+                foreach (var habitLine in lifeLoop?.ExplainHabitLines(arg) ?? Array.Empty<string>())
+                    LogLine(consoleLockProvider(), logBuffer, logWriter, $"ОБЪЯСНЕНИЕ ПРИВЫЧКИ: {habitLine}");
+                break;
+            case "character.status":
+                if (lifeLoop is not null)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        $"ХАРАКТЕР: {lifeLoop.GetCharacterStatus()}");
+                break;
             case "llm.status":
                 LogLine(consoleLockProvider(), logBuffer, logWriter,
                     $"LLM CORTEX: {cortex.GetStatusLine()}");
@@ -447,6 +490,22 @@ static void RunCommandLoop(
                     insight is null
                         ? "LLM Cortex: принятых наблюдений пока нет"
                         : $"LLM CORTEX LAST: {JsonSerializer.Serialize(insight, JsonWire.Options)}");
+                break;
+            }
+            case "llm.journal":
+            {
+                var count = int.TryParse(arg, out var parsed) ? Math.Clamp(parsed, 1, 20) : 5;
+                var entries = cortex.GetRecentJournal(count);
+                if (entries.Count == 0)
+                {
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        "Журнал внутреннего голоса пока пуст");
+                    break;
+                }
+                foreach (var entry in entries)
+                    LogLine(consoleLockProvider(), logBuffer, logWriter,
+                        $"ВНУТРЕННИЙ ГОЛОС [{entry.FrameTick}]: {entry.Insight.InnerSpeech} " +
+                        $"(риск={entry.Insight.RiskLevel}, уверенность={entry.Insight.Confidence:F2})");
                 break;
             }
             case "api.status":

@@ -37,4 +37,16 @@ public sealed record EpisodeReport(
     [JsonPropertyName("actionRewardAverages")]
     public IReadOnlyDictionary<string, double> ActionRewardAverages { get; init; } =
         new Dictionary<string, double>(StringComparer.Ordinal);
+
+    [JsonPropertyName("reportSchemaVersion")]
+    public int ReportSchemaVersion { get; init; } = 3;
+
+    [JsonPropertyName("runId")]
+    public string RunId { get; init; } = "";
+
+    [JsonPropertyName("hostVersion")]
+    public string HostVersion { get; init; } = "";
+
+    [JsonPropertyName("configVersion")]
+    public string ConfigVersion { get; init; } = "";
 }

@@ -207,7 +207,7 @@ public sealed class PolicyNetAdapter
         }
 
         if (double.IsNegativeInfinity(max))
-            return q.Length == 0 ? 0 : q.Max();
+            return 0;
         return max;
     }
 

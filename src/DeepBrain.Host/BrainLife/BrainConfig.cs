@@ -32,6 +32,7 @@ public sealed record BrainConfig(
     int SelfTalkRecoveryHoldTicks = 5,
     int SelfTalkCalmWindowHoldTicks = 3,
     MemoryConfig? Memory = null,
+    HabitConfig? Habits = null,
     LlmConfig? Llm = null,
     ExternalApiConfig? ExternalApi = null)
 {
@@ -252,6 +253,7 @@ public sealed record BrainConfig(
         SelfTalkRecoveryHoldTicks: 3,
         SelfTalkCalmWindowHoldTicks: 3,
         Memory: MemoryConfig.Default,
+        Habits: HabitConfig.Default,
         Llm: LlmConfig.Default,
         ExternalApi: ExternalApiConfig.Default
     );
@@ -451,6 +453,54 @@ public sealed record MemoryConfig(
     };
 }
 
+public sealed record HabitConfig
+{
+    public bool Enable { get; init; } = true;
+    public string Path { get; init; } = "memory/habits.v2.json";
+    public string ImportPath { get; init; } = "";
+    public int SaveEveryUpdates { get; init; } = 250;
+    public double CueBaselineLearningRate { get; init; } = 0.02;
+    public double RoutineLearningRate { get; init; } = 0.015;
+    public double AdvantageScale { get; init; } = 0.02;
+    public double NeutralAdvantageBand { get; init; } = 0.001;
+    public double GeneralFloor { get; init; } = 0.05;
+    public double CriticalSkillFloor { get; init; } = 0.20;
+    public double MaxStrength { get; init; } = 0.95;
+    public int DecayEveryTicks { get; init; } = 1000;
+    public int InactiveDecayAfterTicks { get; init; } = 6000;
+    public double InactiveDecayRate { get; init; } = 0.002;
+    public int SatiationWindowTicks { get; init; } = 80;
+    public int SatiationUseLimit { get; init; } = 5;
+    public double SatiationFactor { get; init; } = 0.60;
+    public double LegacyEvidenceWeight { get; init; } = 0.55;
+
+    public static HabitConfig Default => new();
+
+    public HabitConfig Normalize() => this with
+    {
+        Path = string.IsNullOrWhiteSpace(Path) ? "memory/habits.v2.json" : Path.Trim(),
+        ImportPath = ImportPath?.Trim() ?? "",
+        SaveEveryUpdates = Math.Clamp(SaveEveryUpdates, 1, 100_000),
+        CueBaselineLearningRate = ClampFinite(CueBaselineLearningRate, 0.02, 0.0001, 1),
+        RoutineLearningRate = ClampFinite(RoutineLearningRate, 0.015, 0.0001, 0.25),
+        AdvantageScale = ClampFinite(AdvantageScale, 0.02, 0.000001, 1),
+        NeutralAdvantageBand = ClampFinite(NeutralAdvantageBand, 0.001, 0, 0.25),
+        GeneralFloor = ClampFinite(GeneralFloor, 0.05, 0, 0.90),
+        CriticalSkillFloor = ClampFinite(CriticalSkillFloor, 0.20, 0, 0.90),
+        MaxStrength = ClampFinite(MaxStrength, 0.95, 0.10, 1),
+        DecayEveryTicks = Math.Clamp(DecayEveryTicks, 20, 1_000_000),
+        InactiveDecayAfterTicks = Math.Clamp(InactiveDecayAfterTicks, 100, 10_000_000),
+        InactiveDecayRate = ClampFinite(InactiveDecayRate, 0.002, 0, 0.10),
+        SatiationWindowTicks = Math.Clamp(SatiationWindowTicks, 1, 100_000),
+        SatiationUseLimit = Math.Clamp(SatiationUseLimit, 1, 10_000),
+        SatiationFactor = ClampFinite(SatiationFactor, 0.60, 0.05, 1),
+        LegacyEvidenceWeight = ClampFinite(LegacyEvidenceWeight, 0.55, 0, 1)
+    };
+
+    private static double ClampFinite(double value, double fallback, double min, double max) =>
+        Math.Clamp(double.IsFinite(value) ? value : fallback, min, max);
+}
+
 public sealed record LlmConfig
 {
     public bool Enable { get; init; }
@@ -459,6 +509,8 @@ public sealed record LlmConfig
     public string Model { get; init; } = "qwen3.5:4b-q4_K_M";
     public bool AutoObserve { get; init; }
     public int ObserveEveryTicks { get; init; } = 300;
+    public int MinObserveGapTicks { get; init; } = 300;
+    public bool ObserveOnTransitions { get; init; } = true;
     public int TimeoutSeconds { get; init; } = 120;
     public int MaxStalenessTicks { get; init; } = 600;
     public int NumPredict { get; init; } = 128;
@@ -467,6 +519,10 @@ public sealed record LlmConfig
     public int MaxMemoryLines { get; init; } = 2;
     public int MaxRecentEvents { get; init; } = 2;
     public int MaxContextChars { get; init; } = 96;
+    public double MinConfidence { get; init; } = 0.45;
+    public bool PersistJournal { get; init; } = true;
+    public string JournalPath { get; init; } = "memory/inner-voice.jsonl";
+    public int MaxJournalEntries { get; init; } = 1000;
 
     public static LlmConfig Default => new();
 
@@ -476,6 +532,7 @@ public sealed record LlmConfig
         BaseUrl = NormalizeBaseUrl(BaseUrl),
         Model = string.IsNullOrWhiteSpace(Model) ? "qwen3.5:4b-q4_K_M" : Model.Trim(),
         ObserveEveryTicks = Math.Clamp(ObserveEveryTicks, 10, 1_000_000),
+        MinObserveGapTicks = Math.Clamp(MinObserveGapTicks, 10, 1_000_000),
         TimeoutSeconds = Math.Clamp(TimeoutSeconds, 5, 600),
         MaxStalenessTicks = Math.Clamp(MaxStalenessTicks, 1, 100_000),
         NumPredict = Math.Clamp(NumPredict, 32, 1024),
@@ -483,7 +540,10 @@ public sealed record LlmConfig
         KeepAlive = string.IsNullOrWhiteSpace(KeepAlive) ? "5m" : KeepAlive.Trim(),
         MaxMemoryLines = Math.Clamp(MaxMemoryLines, 0, 8),
         MaxRecentEvents = Math.Clamp(MaxRecentEvents, 0, 12),
-        MaxContextChars = Math.Clamp(MaxContextChars, 40, 400)
+        MaxContextChars = Math.Clamp(MaxContextChars, 40, 400),
+        MinConfidence = Math.Clamp(double.IsFinite(MinConfidence) ? MinConfidence : 0.45, 0, 1),
+        JournalPath = string.IsNullOrWhiteSpace(JournalPath) ? "memory/inner-voice.jsonl" : JournalPath.Trim(),
+        MaxJournalEntries = Math.Clamp(MaxJournalEntries, 10, 100_000)
     };
 
     private static string NormalizeBaseUrl(string? value)
