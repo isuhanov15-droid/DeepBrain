@@ -8,4 +8,8 @@ public sealed record GoalOutcomeDto(string PlanId, string GoalId, string GoalTit
 public sealed record ExecutiveStateDto(bool Enabled, long AwakeClock, PlanDto? Plan,
     long Succeeded, long Failed, long Interrupted, IReadOnlyList<GoalOutcomeDto> RecentOutcomes,
     string? LastError, DateTimeOffset? LastSavedAt, string? PreferredAction, double AppliedBias,
-    string BiasStatus, bool RevalidatedAfterRestart);
+    string BiasStatus, bool RevalidatedAfterRestart)
+{
+    public string? SavedScenario { get; init; }
+    public string ScenarioResumeStatus { get; init; } = "not_attempted";
+}

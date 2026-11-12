@@ -202,7 +202,12 @@ public sealed class LifeLoop
 
     public IReadOnlyList<string> ListScenarios() => _curriculum.ListScenarios();
 
-    public bool TrySetScenario(string name) => _curriculum.TrySetScenario(name);
+    public bool TrySetScenario(string name)
+    {
+        if (!_curriculum.TrySetScenario(name)) return false;
+        _executive.RememberScenario(_curriculum.ScenarioName, _episode.EpisodeId);
+        return true;
+    }
 
     public void SetCurriculumMode(string mode)
     {
@@ -212,7 +217,8 @@ public sealed class LifeLoop
 
     public void NextScenario()
     {
-        _curriculum.Advance(double.PositiveInfinity);
+        if (_curriculum.Advance(double.PositiveInfinity))
+            _executive.RememberScenario(_curriculum.ScenarioName, _episode.EpisodeId);
     }
 
     public void SetMlMode(string mode)
@@ -512,7 +518,7 @@ public sealed class LifeLoop
         else if (!string.IsNullOrWhiteSpace(config.CurriculumMode))
             curriculumCfg = curriculumCfg with { Mode = config.CurriculumMode };
         _curriculum.Configure(curriculumCfg, scenarioCfg);
-        if (_tick == 0 && !string.IsNullOrWhiteSpace(config.ScenarioDefault))
+        if (_tick == 0 && !_executive.TryRestoreScenario(_curriculum) && !string.IsNullOrWhiteSpace(config.ScenarioDefault))
             _curriculum.TrySetScenario(config.ScenarioDefault);
         _policyEvaluator.Configure(evalCfg);
         var scenario = _curriculum.GetScenario();
@@ -575,6 +581,9 @@ public sealed class LifeLoop
                 throw new IOException("Existing ML checkpoint could not be restored; refusing fresh initialization: " + mlConfig.CheckpointPath);
             _mlLoaded = true;
         }
+        // Without ML there is no outer checkpoint to restore the episode identity from.
+        if (_tick == 0 && !_mlLoaded && _executive.SavedScenario is { } savedScenario)
+            _episode.SetEpisodeId(savedScenario.EpisodeId);
         if (mlConfig.Enable && _tick > 0 && _tick % 500 == 0)
         {
             try { _ml.TrySave(mlConfig.CheckpointPath, _episode.EpisodeId); }
@@ -1156,6 +1165,7 @@ public sealed class LifeLoop
                 _log($"СЛЕДУЮЩИЙ СЦЕНАРИЙ название={RussianDisplay.Token(_curriculum.ScenarioName)} " +
                      $"индекс={_curriculum.ScenarioIndex} режим={RussianDisplay.Token(_curriculum.Mode)}");
             ResetEpisode(resetReason, episodeConfig);
+            _executive.RememberScenario(_curriculum.GetScenario().Name, _episode.EpisodeId);
             _log($"СБРОС ЭПИЗОДА причина={RussianDisplay.Token(resetReason)} id={_episode.EpisodeId}");
             EmitTrace("episode.reset",
                 $"эпизод={_episode.EpisodeId} причина={RussianDisplay.Token(resetReason)}", ct);

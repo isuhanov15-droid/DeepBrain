@@ -10,6 +10,10 @@ namespace DeepBrain.Host.BrainLife;
 public sealed record ExecutiveObservation(string Scenario, int EpisodeId, HomeostasisDto Body,
     double AgencyNeed, double Novelty, bool SocialSignalPending, bool Sleeping = false);
 
+public sealed record PlanningScenarioContext(
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] int EpisodeId);
+
 /// <summary>Persistent intentions with measured outcomes; no changes to ML state shape or reward.</summary>
 public sealed class ExecutivePlanner
 {
@@ -26,9 +30,48 @@ public sealed class ExecutivePlanner
     private DateTimeOffset? _lastSavedAt;
     private double _appliedBias;
     private string _biasStatus = "idle";
+    private string _scenarioResumeStatus = "not_attempted";
     public ExecutivePlanner(Action<string>? log = null) => _log = log ?? (_ => { });
     public bool Enabled { get { lock (_gate) return _config.Enable; } }
     public long ContextRevision { get { lock (_gate) return _state.Revision; } }
+    public PlanningScenarioContext? SavedScenario
+    {
+        get { lock (_gate) return !_config.Enable ? null : _state.ScenarioContext ??
+            (_state.Active is { } p ? new PlanningScenarioContext(p.Scenario, p.EpisodeId) : null); }
+    }
+
+    public bool TryRestoreScenario(CurriculumManager curriculum)
+    {
+        lock (_gate)
+        {
+            var context = SavedScenario;
+            if (context is null) { _scenarioResumeStatus = _config.Enable ? "not_saved" : "disabled"; return false; }
+            if (!curriculum.TrySetScenario(context.Name))
+            {
+                _scenarioResumeStatus = "unavailable";
+                _log("Сохранённый сценарий отсутствует в конфигурации: " + context.Name);
+                return false;
+            }
+            _scenarioResumeStatus = "restored";
+            _log("СЦЕНАРИЙ ВОССТАНОВЛЕН: " + curriculum.ScenarioName);
+            return true;
+        }
+    }
+
+    public bool RememberScenario(string name, int episodeId, bool flush = true)
+    {
+        lock (_gate)
+        {
+            if (!_config.Enable) return false;
+            if (string.IsNullOrWhiteSpace(name) || episodeId < 0)
+                throw new InvalidDataException("Invalid scenario context");
+            var context = new PlanningScenarioContext(name, episodeId);
+            if (_state.ScenarioContext == context) return false;
+            _state.ScenarioContext = context; _dirty = true;
+            if (flush) Flush();
+            return true;
+        }
+    }
 
     public void Configure(PlanningConfig settings)
     {
@@ -51,7 +94,7 @@ public sealed class ExecutivePlanner
                 Validate(loaded);
                 _state = loaded; _path = path; _resumePending = loaded.Active is not null;
                 _lastSaveAttemptClock = loaded.AwakeClock; _dirty = false;
-                _revalidated = false; _lastError = null;
+                _revalidated = false; _lastError = null; _scenarioResumeStatus = "not_attempted";
                 _lastSavedAt = File.Exists(path) ? new DateTimeOffset(File.GetLastWriteTimeUtc(path)) : null;
             }
             _config = config;
@@ -65,14 +108,16 @@ public sealed class ExecutivePlanner
             _appliedBias = 0; _biasStatus = "idle";
             if (!_config.Enable) return null;
             Validate(observation);
+            var contextChanged = RememberScenario(observation.Scenario, observation.EpisodeId, flush: false);
             if (_state.Active is { } previous &&
-                (previous.Scenario != observation.Scenario || previous.EpisodeId != observation.EpisodeId))
+                (!string.Equals(previous.Scenario, observation.Scenario, StringComparison.OrdinalIgnoreCase) || previous.EpisodeId != observation.EpisodeId))
                 Finish("interrupted", "context_changed", "Сценарий или эпизод сменился");
             if (observation.Sleeping)
             {
                 if (_state.Active is { } sleeping && sleeping.Status != "paused")
                 { sleeping.Status = "paused"; sleeping.Evidence = "План приостановлен на время сна"; _dirty = true; Flush(); }
                 _biasStatus = "sleeping";
+                if (contextChanged) Flush();
                 return Plan();
             }
             _state.AwakeClock++; _dirty = true;
@@ -116,7 +161,7 @@ public sealed class ExecutivePlanner
                 _state.Revision++;
                 _log("ЦЕЛЬ ПРИНЯТА: " + Title(top.Key));
             }
-            MaybeFlush();
+            if (contextChanged) Flush(); else MaybeFlush();
             return Plan();
         }
     }
@@ -143,7 +188,8 @@ public sealed class ExecutivePlanner
         {
             if (!_config.Enable || _state.Active is not { Status: "active" } plan) return null;
             Validate(after);
-            if (before.Scenario != plan.Scenario || after.Scenario != plan.Scenario || after.EpisodeId != plan.EpisodeId)
+            if (!string.Equals(before.Scenario, plan.Scenario, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(after.Scenario, plan.Scenario, StringComparison.OrdinalIgnoreCase) || after.EpisodeId != plan.EpisodeId)
                 return Finish("interrupted", "context_changed", "Условия выполнения изменились");
             if (!invalidAction)
             {
@@ -188,7 +234,8 @@ public sealed class ExecutivePlanner
     {
         lock (_gate) return new(_config.Enable, _state.AwakeClock, Plan(), _state.Succeeded, _state.Failed,
             _state.Interrupted, _state.Outcomes.TakeLast(_config.MaxOutcomes).Reverse().ToArray(), _lastError,
-            _lastSavedAt, _state.Active is { } p ? Preferred(p) : null, _appliedBias, _biasStatus, _revalidated);
+            _lastSavedAt, _state.Active is { } p ? Preferred(p) : null, _appliedBias, _biasStatus, _revalidated)
+        { SavedScenario = SavedScenario?.Name, ScenarioResumeStatus = _scenarioResumeStatus };
     }
 
     public void Flush()
@@ -298,6 +345,8 @@ public sealed class ExecutivePlanner
     }
     private static void Validate(PlannerState s)
     {
+        if (s.ScenarioContext is { } context && (string.IsNullOrWhiteSpace(context.Name) || context.EpisodeId < 0))
+            throw new InvalidDataException("Invalid persisted scenario context");
         if (s.SchemaVersion != 1 || s.AwakeClock < 0 || s.Revision < 0 || s.Succeeded < 0 || s.Failed < 0 ||
             s.Interrupted < 0 || s.Cooldowns is null || s.Outcomes is null || s.Outcomes.Count > 200 ||
             s.Cooldowns.Any(p => !Goals.Contains(p.Key) || p.Value < 0) ||
@@ -316,6 +365,8 @@ public sealed class ExecutivePlanner
     }
     private sealed class PlannerState
     {
+        // Optional additive metadata: existing schema-1 files remain readable.
+        public PlanningScenarioContext? ScenarioContext { get; set; }
         [JsonRequired] public int SchemaVersion { get; set; } = 1;
         [JsonRequired] public long AwakeClock { get; set; }
         [JsonRequired] public long Revision { get; set; }

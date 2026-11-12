@@ -102,6 +102,8 @@ public sealed class ExecutivePlannerTests : IDisposable
     public void FailedSaveCannotDiscardHistoryWhenConfigurationChanges()
     {
         var planner = Create(); var plan = planner.Begin(new[] { G("explore") }, O())!;
+        planner.Begin(new[] { G("explore") }, O());
+        File.Delete(Settings.Path);
         Directory.CreateDirectory(Settings.Path); // Prevent replacing this path with a file.
         planner.Flush(); Assert.NotNull(planner.Snapshot().LastError);
         Assert.Throws<IOException>(() => planner.Configure(Settings with { Path = Path.Combine(_directory, "other.json") }));
