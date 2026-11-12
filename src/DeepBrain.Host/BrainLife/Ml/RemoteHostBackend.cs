@@ -153,8 +153,12 @@ public sealed class RemoteHostBackend : IBrainMlBackend
                 var meta = JsonSerializer.Deserialize<RemoteCheckpointMeta>(
                     resp.Meta,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                if (meta is not null)
-                    _trainSteps = Math.Max(_trainSteps, meta.TrainSteps);
+                  if (meta is not null)
+                  {
+                      _trainSteps = Math.Max(_trainSteps, meta.TrainSteps);
+                      _bufferSize = Math.Max(0, meta.BufferCount);
+                      if (meta.BufferCapacity > 0) BufferCapacity = meta.BufferCapacity;
+                  }
             }
             catch (JsonException ex)
             {
@@ -241,7 +245,7 @@ public sealed class RemoteHostBackend : IBrainMlBackend
         return _lossWindow.Average();
     }
 
-    private sealed record RemoteCheckpointMeta(long TrainSteps, string? WeightsPath);
+    private sealed record RemoteCheckpointMeta(long TrainSteps, string? WeightsPath, int BufferCount = 0, int BufferCapacity = 0);
 
     private void RateLimitedLog(string message)
     {

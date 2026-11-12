@@ -32,9 +32,10 @@ confidence, applied score bias and source frame age. `applied` means scores were
 biased; `matchesSelection` means the selected action matched. Neither is a claim
 that the recommendation caused that choice. Web Studio 0.2 displays this distinction.
 
-The trained model remains 38 inputs / 8 actions. Checkpoint, episodic memory,
-scenario experience and habit formats and paths are unchanged. Existing weight-only
-checkpoint limitations remain: optimizer and replay buffer are not restored.
+The trained model remains 38 inputs / 8 actions. Episodic memory, scenario experience
+and habit formats and paths are unchanged. With the ML replay-persistence runtime,
+checkpoint schema 2 also restores the replay buffer and target network. Older ML
+builds remain weights-only. Optimizer moments and sampling RNG position are not restored.
 
 Validation: contract compatibility and allowlist, expiry boundaries, stale/future
 frames, out-of-order callbacks, context changes, sleep and recovery guards,
