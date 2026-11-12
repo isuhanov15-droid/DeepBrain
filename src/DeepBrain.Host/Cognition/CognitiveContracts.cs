@@ -51,6 +51,10 @@ public sealed record CognitiveFrame(
     public bool IsSleeping { get; init; }
     public string CircadianPhase { get; init; } = "";
     public IReadOnlyList<string> AvailableActions { get; init; } = Array.Empty<string>();
+    public string ActiveGoal { get; init; } = "";
+    public string PlanStage { get; init; } = "";
+    public string GoalCriterion { get; init; } = "";
+    public double GoalProgress { get; init; }
 }
 
 public sealed record CognitiveInsight(

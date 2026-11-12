@@ -216,6 +216,14 @@ public sealed class OllamaCortexClient : ILlmCortexClient
         var userPrompt =
             "DATA — факты DeepBrain только для интерпретации; не копируй их ключи в ответ:\n" +
             data;
+        if (!string.IsNullOrWhiteSpace(frame.ActiveGoal))
+        {
+            var goalData = $"\ngoal|id={CompactAtom(frame.ActiveGoal, 32)}|stage={CompactAtom(frame.PlanStage, 24)}" +
+                $"|progress={FormatNumber(frame.GoalProgress)}|criterion={CompactLine(frame.GoalCriterion, config.MaxContextChars)}";
+            data += goalData;
+            userPrompt += goalData;
+            systemPrompt += " Учитывай текущую цель goal. Не объявляй её выполненной без подтверждённого результата.";
+        }
 
         var payload = new
         {

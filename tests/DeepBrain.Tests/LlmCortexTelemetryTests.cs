@@ -112,7 +112,11 @@ public sealed class LlmCortexTelemetryTests
             AttentionFocus = "novelty",
             ActiveHabitId = "explore_window",
             HabitInfluence = 0.22,
-            PreviousInnerSpeech = "Я замечаю окно исследования"
+            PreviousInnerSpeech = "Я замечаю окно исследования",
+            ActiveGoal = "explore",
+            PlanStage = "verify",
+            GoalProgress = 0.5,
+            GoalCriterion = "Два исследования с измеримым эффектом"
         };
 
         var response = await client.ObserveAsync(frame, config, CancellationToken.None);
@@ -149,7 +153,9 @@ public sealed class LlmCortexTelemetryTests
         Assert.Equal(
             (messages[0].GetProperty("content").GetString() ?? "").Length + userContent.Length,
             metrics.PromptCharacters);
-        Assert.True(data.Length < 900, $"data chars={data.Length}");
+        Assert.True(data.Length < 1100, $"data chars={data.Length}");
+        Assert.Contains("\ngoal|id=explore|stage=verify|progress=0.5|criterion=Два исследования с измеримым эффектом", data);
+        Assert.Contains("Не объявляй её выполненной", messages[0].GetProperty("content").GetString());
         Assert.DoesNotContain("contractVersion", data);
         Assert.DoesNotContain("frameId", data);
         Assert.DoesNotContain("timestamp", data);

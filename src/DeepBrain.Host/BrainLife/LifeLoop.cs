@@ -42,6 +42,7 @@ public sealed class LifeLoop
     public void AcceptCortexInsight(CognitiveInsightEnvelope insight) => _cortexActions.Accept(insight);
     private readonly GoalResolver _goals = new();
     private readonly PlanEngine _plan = new();
+    private readonly ExecutivePlanner _executive;
     private readonly AttentionEngine _attention = new();
     private readonly AttentionInertiaEngine _attentionInertia = new();
     private readonly SemanticMemory _semantic = new();
@@ -167,6 +168,8 @@ public sealed class LifeLoop
         _output = output;
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
+        _executive = new ExecutivePlanner(_log);
+        _executive.Configure(cfg.Planning ?? PlanningConfig.Default);
         _habits = new HabitSystem(_log);
         _habits.Configure(cfg.Habits ?? HabitConfig.Default);
         _longTermMemory = new PersistentEpisodicMemory(_log);
@@ -294,6 +297,7 @@ public sealed class LifeLoop
 
     public void FlushPersistentState()
     {
+        _executive.Flush();
         _habits.Flush();
         _reportWriter.CompleteAsync().GetAwaiter().GetResult();
         var (cfg, _) = _configLoader.GetCurrent();
@@ -497,6 +501,7 @@ public sealed class LifeLoop
         var curriculumCfg = config.Curriculum ?? BrainConfig.Default.Curriculum;
         var evalCfg = config.Evaluation ?? BrainConfig.Default.Evaluation;
         var memoryCfg = config.Memory ?? MemoryConfig.Default;
+        _executive.Configure(config.Planning ?? PlanningConfig.Default);
         _longTermMemory.Configure(memoryCfg);
         _habits.Configure(config.Habits ?? HabitConfig.Default);
         _habits.AdvanceTime(_tick);
@@ -589,6 +594,9 @@ public sealed class LifeLoop
 
         if (_sleep.IsSleeping)
         {
+            var pausedPlan = _executive.Begin(Array.Empty<DeepBrain.Shared.BrainDtos.V3.GoalDto>(),
+                new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo, 0,
+                    _world.Novelty, SocialContactResponder.HasPending(_world.Events), true));
             if (!_sleepConsolidated)
             {
                 var sums = _memory.Consolidate();
@@ -625,7 +633,7 @@ public sealed class LifeLoop
                 1.0 - _affect.Arousal,
                 circadian,
                 Array.Empty<DeepBrain.Shared.BrainDtos.V3.GoalDto>(),
-                null,
+                pausedPlan,
                 null,
                 _world.Events.GetRecent(5),
                 _semantic.GetTopNotes(3),
@@ -664,7 +672,7 @@ public sealed class LifeLoop
                 new CurriculumStateDto(_curriculumMode, _scenarioIndex),
                 new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
                 new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
-            ) { CortexContextId = CortexContextId };
+            ) { CortexContextId = CortexContextId, Executive = _executive.Snapshot() };
             EmitTrace("tick", $"тик={_tick} эпизод={_episode.EpisodeId} действие=сон награда=0.000 петля=нет ε=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
@@ -716,15 +724,19 @@ public sealed class LifeLoop
         var goals = _goals.Resolve(_homeo, instincts, dominantDrive, circ.Phase);
         if (_world.CalmLevel > 0.6 && _homeo.Energy > 0.5 && _homeo.Pain < 0.4)
             goals = ApplyExploreRebound(goals);
-        var activePlan = _plan.Update(goals, dominantDrive, _loop.LoopPenalty, _sleep.IsSleeping, instincts.SelfPreservation);
-        if (_plan.Created)
+        if (_executive.Enabled) goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
+        var executiveBefore = new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo,
+            instincts.Agency, _world.Novelty, hasPendingSocialSignal);
+        var activePlan = _executive.Enabled ? _executive.Begin(goals, executiveBefore)
+            : _plan.Update(goals, dominantDrive, _loop.LoopPenalty, _sleep.IsSleeping, instincts.SelfPreservation);
+        if (!_executive.Enabled && _plan.Created)
             _log($"ПЛАН СОЗДАН: {RussianDisplay.Token(activePlan?.Strategy)} " +
                  $"цель={RussianDisplay.Token(activePlan?.GoalId)} " +
                  $"осталось тиков={activePlan?.RemainingTicks}");
-        if (_plan.Interrupted)
+        if (!_executive.Enabled && _plan.Interrupted)
             _log("ПЛАН ПРЕРВАН");
 
-        goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
+        if (!_executive.Enabled) goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
         var semanticKey = $"{_affect.Mood}+drive={dominantDrive}+phase={circ.Phase}+focus={attention.Focus1}";
         var cueKey = _habits.ComputeCue(attention, circ, _loop, recentEvents, _homeo);
         var (habitAction, habitStrength, habitId) = _habits.Suggest(cueKey);
@@ -834,6 +846,7 @@ public sealed class LifeLoop
 
         var cortexAdvice = _cortexActions.Apply(config.Llm ?? LlmConfig.Default, _tick,
             CortexContextId, false, _homeo.Safety, _homeo.Pain, heuristicScores);
+        _executive.ApplyBias(heuristicScores);
 
         var stateVec = mlConfigEffective.Enable
             ? _ml.Encode(new StateVectorInput(
@@ -886,6 +899,12 @@ public sealed class LifeLoop
             ? SocialContactResponder.ConsumePending(_world.Events)
             : 0;
         var socialContactHandled = socialSignalsHandled > 0;
+        var executiveAfter = new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo,
+            LifeMath.Clamp01(_instincts.Compute(_homeo, _world, config.Drives).Agency - _agencyOffset),
+            _world.Novelty, SocialContactResponder.HasPending(_world.Events));
+        var goalOutcome = _executive.Observe(action.Name, executiveBefore, executiveAfter, invalidAction, socialSignalsHandled);
+        if (goalOutcome is not null)
+            _goals.ApplyGoalSatisfaction(goalOutcome.GoalId, goalOutcome.Status == "succeeded" ? 0.15 : -0.05);
         if (socialContactHandled)
             EmitTrace("social.response", new { consumed = socialSignalsHandled, tick = _tick }, ct);
 
@@ -1051,7 +1070,7 @@ public sealed class LifeLoop
             moodInertia,
             circ,
             goals,
-            activePlan,
+            _executive.Enabled ? _executive.Snapshot().Plan : activePlan,
             attention,
             recentEvents,
             _semantic.GetTopNotes(3),
@@ -1080,7 +1099,7 @@ public sealed class LifeLoop
             new CurriculumStateDto(_curriculumMode, _scenarioIndex),
             new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
             loopInfo
-        ) { CortexContextId = CortexContextId };
+        ) { CortexContextId = CortexContextId, Executive = _executive.Snapshot() };
         EmitTrace("tick",
             $"тик={_tick} эпизод={_episode.EpisodeId} " +
             $"действие={RussianDisplay.Token(action.Name)} награда={rewardDto.Total:0.000} " +
@@ -1099,7 +1118,7 @@ public sealed class LifeLoop
         _memory.Add(episode, activePlan?.GoalId ?? "none", strategy);
         _semantic.Update(semanticKey, action.Name, rewardDto.Total);
 
-        if (activePlan is not null)
+        if (!_executive.Enabled && activePlan is not null)
             _goals.ApplyGoalSatisfaction(activePlan.GoalId, rewardDto.Total > 0 ? 0.05 : -0.02);
 
         _broadcast(state, ct);

@@ -34,7 +34,8 @@ public sealed record BrainConfig(
     MemoryConfig? Memory = null,
     HabitConfig? Habits = null,
     LlmConfig? Llm = null,
-    ExternalApiConfig? ExternalApi = null)
+    ExternalApiConfig? ExternalApi = null,
+    PlanningConfig? Planning = null)
 {
     public static BrainConfig Default => new(
         new WorldConfig(
@@ -499,6 +500,37 @@ public sealed record HabitConfig
 
     private static double ClampFinite(double value, double fallback, double min, double max) =>
         Math.Clamp(double.IsFinite(value) ? value : fallback, min, max);
+}
+
+public sealed record PlanningConfig
+{
+    public bool Enable { get; init; }
+    public string Path { get; init; } = "memory/planning.json";
+    public int MaxPlanTicks { get; init; } = 180;
+    public int CommitmentTicks { get; init; } = 20;
+    public int StallTicks { get; init; } = 40;
+    public int VerificationTicks { get; init; } = 3;
+    public int MaxReplans { get; init; } = 2;
+    public int GoalCooldownTicks { get; init; } = 40;
+    public int SaveEveryTicks { get; init; } = 50;
+    public int MaxOutcomes { get; init; } = 40;
+    public double SwitchMargin { get; init; } = 0.20;
+    public double MaxActionBias { get; init; } = 0.12;
+    public static PlanningConfig Default => new();
+    public PlanningConfig Normalize() => this with
+    {
+        Path = string.IsNullOrWhiteSpace(Path) ? "memory/planning.json" : Path.Trim(),
+        MaxPlanTicks = Math.Clamp(MaxPlanTicks, 20, 1800),
+        CommitmentTicks = Math.Clamp(CommitmentTicks, 1, Math.Clamp(MaxPlanTicks, 20, 1800)),
+        StallTicks = Math.Clamp(StallTicks, 5, 600),
+        VerificationTicks = Math.Clamp(VerificationTicks, 1, 20),
+        MaxReplans = Math.Clamp(MaxReplans, 0, 5),
+        GoalCooldownTicks = Math.Clamp(GoalCooldownTicks, 1, 600),
+        SaveEveryTicks = Math.Clamp(SaveEveryTicks, 1, 1000),
+        MaxOutcomes = Math.Clamp(MaxOutcomes, 5, 200),
+        SwitchMargin = Math.Clamp(double.IsFinite(SwitchMargin) ? SwitchMargin : 0.20, 0.05, 0.8),
+        MaxActionBias = Math.Clamp(double.IsFinite(MaxActionBias) ? MaxActionBias : 0.12, 0, 0.2)
+    };
 }
 
 public sealed record LlmConfig
