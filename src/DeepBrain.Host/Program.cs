@@ -68,6 +68,7 @@ var cortex = new LlmCortexOrchestrator(
     () => lifeLoop?.GetCortexMemoryLines() ?? Array.Empty<string>(),
     insight =>
     {
+        lifeLoop?.AcceptCortexInsight(insight);
         externalEvents.PublishInsight(insight);
         if (string.IsNullOrWhiteSpace(insight.Insight.InnerSpeech))
             return;

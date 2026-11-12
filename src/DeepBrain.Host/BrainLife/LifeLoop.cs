@@ -2,6 +2,7 @@
 using System.IO;
 using System.Globalization;
 using DeepBrain.Host.BrainLife.Ml;
+using DeepBrain.Host.Cognition;
 using DeepBrain.Shared.Brain;
 using DeepBrain.Shared.BrainDtos.V4;
 using DeepBrain.Shared.BrainDtos.V5;
@@ -35,6 +36,10 @@ public sealed class LifeLoop
     private readonly DominantDriveResolver _driveResolver = new();
     private readonly CircadianClock _clock = new();
     private readonly SleepEngine _sleep = new();
+    private readonly CortexActionAdvisor _cortexActions = new();
+    private long _cortexContextEpoch;
+    private string CortexContextId => $"{_runId}:{_episode.EpisodeId}:{_cortexContextEpoch}";
+    public void AcceptCortexInsight(CognitiveInsightEnvelope insight) => _cortexActions.Accept(insight);
     private readonly GoalResolver _goals = new();
     private readonly PlanEngine _plan = new();
     private readonly AttentionEngine _attention = new();
@@ -506,6 +511,7 @@ public sealed class LifeLoop
             _curriculum.TrySetScenario(config.ScenarioDefault);
         _policyEvaluator.Configure(evalCfg);
         var scenario = _curriculum.GetScenario();
+        if (_scenarioName != scenario.Name) _cortexContextEpoch++;
         _scenarioName = scenario.Name;
         _curriculumMode = _curriculum.Mode;
         _scenarioIndex = _curriculum.ScenarioIndex;
@@ -572,6 +578,7 @@ public sealed class LifeLoop
 
         _clock.Tick(dtSeconds, _sleep.IsSleeping);
         _sleep.Update(_clock, ref _homeo, ref _affect);
+        if (_sleep.EnteredSleep || _sleep.WokeUp) _cortexContextEpoch++;
         if (_sleep.EnteredSleep)
         {
             _sleepConsolidated = false;
@@ -647,12 +654,17 @@ public sealed class LifeLoop
                 ),
                 sleepScenarioInfo,
                 sleepEvalDto,
-                new DecisionDto("sleep", "internal", "sleep", "ok", "heuristic"),
+                new DecisionDto("sleep", "internal", "sleep", "ok", "heuristic")
+                {
+                    CortexAdvice = CortexActionAdvisor.WithSelection(_cortexActions.Apply(
+                        config.Llm ?? LlmConfig.Default, _tick, CortexContextId, true,
+                        _homeo.Safety, _homeo.Pain, new Dictionary<string, double>()), "sleep")
+                },
                 new ScenarioDto(_scenarioName),
                 new CurriculumStateDto(_curriculumMode, _scenarioIndex),
                 new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
                 new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
-            );
+            ) { CortexContextId = CortexContextId };
             EmitTrace("tick", $"тик={_tick} эпизод={_episode.EpisodeId} действие=сон награда=0.000 петля=нет ε=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
@@ -819,6 +831,9 @@ public sealed class LifeLoop
             if (heuristicScores.TryGetValue(c.Action.Name, out var current))
                 heuristicScores[c.Action.Name] = Math.Max(current, c.Score);
         }
+
+        var cortexAdvice = _cortexActions.Apply(config.Llm ?? LlmConfig.Default, _tick,
+            CortexContextId, false, _homeo.Safety, _homeo.Pain, heuristicScores);
 
         var stateVec = mlConfigEffective.Enable
             ? _ml.Encode(new StateVectorInput(
@@ -1007,7 +1022,11 @@ public sealed class LifeLoop
             reason,
             maskStatus,
             decision.PolicySource
-        );
+        )
+        {
+            CortexAdvice = CortexActionAdvisor.WithSelection(cortexAdvice, action.Name),
+            CandidateActions = allowedActions.ToArray()
+        };
         var loopInfo = new LoopInfoDto(
             _loop.IsInLoop,
             _loop.LoopObservedCount,
@@ -1061,7 +1080,7 @@ public sealed class LifeLoop
             new CurriculumStateDto(_curriculumMode, _scenarioIndex),
             new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
             loopInfo
-        );
+        ) { CortexContextId = CortexContextId };
         EmitTrace("tick",
             $"тик={_tick} эпизод={_episode.EpisodeId} " +
             $"действие={RussianDisplay.Token(action.Name)} награда={rewardDto.Total:0.000} " +

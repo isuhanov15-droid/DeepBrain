@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DeepBrain.Host.BrainLife.Ml;
 
 namespace DeepBrain.Host.Cognition;
 
@@ -46,6 +47,10 @@ public sealed record CognitiveFrame(
     public string ActiveHabitId { get; init; } = "";
     public double HabitInfluence { get; init; }
     public string PreviousInnerSpeech { get; init; } = "";
+    public string DecisionContextId { get; init; } = "";
+    public bool IsSleeping { get; init; }
+    public string CircadianPhase { get; init; } = "";
+    public IReadOnlyList<string> AvailableActions { get; init; } = Array.Empty<string>();
 }
 
 public sealed record CognitiveInsight(
@@ -55,6 +60,9 @@ public sealed record CognitiveInsight(
     [property: JsonPropertyName("risk_level")] string RiskLevel,
     [property: JsonPropertyName("confidence")] double Confidence)
 {
+    [JsonPropertyName("suggested_action")]
+    public string SuggestedAction { get; init; } = "none";
+
     public static bool TryParseStrict(string json, out CognitiveInsight? insight, out string? error)
     {
         insight = null;
@@ -71,7 +79,14 @@ public sealed record CognitiveInsight(
             }
 
             var names = root.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
-            if (!names.SetEquals(CognitiveContract.InsightProperties))
+            var expected = CognitiveContract.InsightProperties.ToHashSet(StringComparer.Ordinal);
+            if (names.Contains("suggested_action")) expected.Add("suggested_action");
+            if (root.EnumerateObject().Count() != names.Count)
+            {
+                error = "duplicate LLM properties are not allowed";
+                return false;
+            }
+            if (!names.SetEquals(expected))
             {
                 var missing = CognitiveContract.InsightProperties.Except(names).OrderBy(value => value);
                 var unknown = names.Except(CognitiveContract.InsightProperties).OrderBy(value => value);
@@ -100,7 +115,22 @@ public sealed record CognitiveInsight(
                 return false;
             }
 
-            insight = new CognitiveInsight(interpretation!, innerSpeech!, memoryQuestion!, riskLevel!, confidence);
+            var suggestedAction = "none";
+            if (names.Contains("suggested_action"))
+            {
+                if (!TryGetBoundedString(root, "suggested_action", 1, 32, out var action, out error))
+                    return false;
+                if (action != "none" && ActionCatalog.IndexOf(action!) < 0)
+                {
+                    error = "suggested_action must be none or a known action";
+                    return false;
+                }
+                suggestedAction = action!;
+            }
+            insight = new CognitiveInsight(interpretation!, innerSpeech!, memoryQuestion!, riskLevel!, confidence)
+            {
+                SuggestedAction = suggestedAction
+            };
             return true;
         }
         catch (JsonException ex)
@@ -150,7 +180,10 @@ public sealed record CognitiveInsightEnvelope(
     TimeSpan Latency,
     CognitiveInsight Insight,
     LlmGenerationMetrics? Metrics = null
-);
+)
+{
+    public string SourceContextId { get; init; } = "";
+}
 
 public sealed record LlmGenerationMetrics(
     int RequestBytes,

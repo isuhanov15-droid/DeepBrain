@@ -40,4 +40,8 @@ public sealed record LifeStateDto(
     [property: JsonPropertyName("curriculum")] CurriculumStateDto? Curriculum = null,
     [property: JsonPropertyName("tickInfo")] TickInfoDto? TickInfo = null,
     [property: JsonPropertyName("loopInfo")] LoopInfoDto? LoopInfo = null
-);
+)
+{
+    [JsonPropertyName("cortexContextId")]
+    public string CortexContextId { get; init; } = "";
+}

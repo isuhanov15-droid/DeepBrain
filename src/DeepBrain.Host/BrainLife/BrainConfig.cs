@@ -523,6 +523,10 @@ public sealed record LlmConfig
     public bool PersistJournal { get; init; } = true;
     public string JournalPath { get; init; } = "memory/inner-voice.jsonl";
     public int MaxJournalEntries { get; init; } = 1000;
+    public bool ActionAdviceEnabled { get; init; }
+    public int ActionAdviceMaxAgeTicks { get; init; } = 600;
+    public double ActionAdviceMinConfidence { get; init; } = 0.6;
+    public double ActionAdviceMaxBias { get; init; } = 0.15;
 
     public static LlmConfig Default => new();
 
@@ -543,7 +547,10 @@ public sealed record LlmConfig
         MaxContextChars = Math.Clamp(MaxContextChars, 40, 400),
         MinConfidence = Math.Clamp(double.IsFinite(MinConfidence) ? MinConfidence : 0.45, 0, 1),
         JournalPath = string.IsNullOrWhiteSpace(JournalPath) ? "memory/inner-voice.jsonl" : JournalPath.Trim(),
-        MaxJournalEntries = Math.Clamp(MaxJournalEntries, 10, 100_000)
+        MaxJournalEntries = Math.Clamp(MaxJournalEntries, 10, 100_000),
+        ActionAdviceMaxAgeTicks = Math.Clamp(ActionAdviceMaxAgeTicks, 1, 1800),
+        ActionAdviceMinConfidence = Math.Clamp(double.IsFinite(ActionAdviceMinConfidence) ? ActionAdviceMinConfidence : 0.6, 0.5, 1),
+        ActionAdviceMaxBias = Math.Clamp(double.IsFinite(ActionAdviceMaxBias) ? ActionAdviceMaxBias : 0.15, 0, 0.25)
     };
 
     private static string NormalizeBaseUrl(string? value)

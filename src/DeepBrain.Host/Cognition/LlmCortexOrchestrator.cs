@@ -333,7 +333,10 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
                 reason,
                 response.Latency,
                 response.Insight,
-                response.Metrics);
+                response.Metrics)
+            {
+                SourceContextId = frame.DecisionContextId
+            };
 
             lock (_sync)
             {
@@ -399,6 +402,10 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
             ReadRecentEvents(state.RecentEvents, config.MaxRecentEvents, config.MaxContextChars),
             memory)
         {
+            DecisionContextId = state.CortexContextId,
+            IsSleeping = state.Circadian?.IsSleeping ?? false,
+            CircadianPhase = state.Circadian?.Phase ?? "",
+            AvailableActions = state.Decision?.CandidateActions ?? Array.Empty<string>(),
             Energy = FiniteOrZero(state.Homeostasis.Energy),
             Fatigue = FiniteOrZero(state.Homeostasis.Fatigue),
             ExplorationNeed = FiniteOrZero(state.Instincts.Exploration),

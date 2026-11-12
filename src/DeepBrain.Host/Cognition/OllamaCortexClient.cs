@@ -128,19 +128,25 @@ public sealed class OllamaCortexClient : ILlmCortexClient
         CognitiveFrame frame,
         LlmConfig config)
     {
+        var properties = new Dictionary<string, object>
+        {
+            ["interpretation"] = new { type = "string", maxLength = CognitiveContract.InterpretationMaxLength },
+            ["inner_speech"] = new { type = "string", maxLength = CognitiveContract.InnerSpeechMaxLength },
+            ["memory_question"] = new { type = "string", maxLength = CognitiveContract.MemoryQuestionMaxLength },
+            ["risk_level"] = new { type = "string", @enum = new[] { "low", "medium", "high" } },
+            ["confidence"] = new { type = "number", minimum = 0, maximum = 1 }
+        };
+        var availableActions = (frame.IsSleeping ? Array.Empty<string>() : frame.AvailableActions)
+            .Where(action => DeepBrain.Host.BrainLife.Ml.ActionCatalog.IndexOf(action) >= 0)
+            .Distinct(StringComparer.Ordinal).Append("none").ToArray();
+        if (config.ActionAdviceEnabled)
+            properties["suggested_action"] = new { type = "string", @enum = availableActions };
         var schema = new
         {
             type = "object",
             additionalProperties = false,
-            properties = new Dictionary<string, object>
-            {
-                ["interpretation"] = new { type = "string", maxLength = CognitiveContract.InterpretationMaxLength },
-                ["inner_speech"] = new { type = "string", maxLength = CognitiveContract.InnerSpeechMaxLength },
-                ["memory_question"] = new { type = "string", maxLength = CognitiveContract.MemoryQuestionMaxLength },
-                ["risk_level"] = new { type = "string", @enum = new[] { "low", "medium", "high" } },
-                ["confidence"] = new { type = "number", minimum = 0, maximum = 1 }
-            },
-            required = CognitiveContract.InsightProperties.OrderBy(value => value).ToArray()
+            properties,
+            required = properties.Keys.OrderBy(value => value).ToArray()
         };
 
         // Keep the contract in the prompt as well as in `format`. Some
@@ -160,6 +166,21 @@ public sealed class OllamaCortexClient : ILlmCortexClient
             $"inner_speech<={CognitiveContract.InnerSpeechMaxLength}, " +
             $"memory_question<={CognitiveContract.MemoryQuestionMaxLength}. " +
             "Не копируй DATA и не добавляй ключи.";
+
+        if (config.ActionAdviceEnabled)
+        {
+            systemPrompt = systemPrompt
+                .Replace("Не выбирай действия, не управляй, не изменяй память и не выдумывай датчики.",
+                    "Предлагай действие, не изменяй память и не выдумывай датчики. Рекомендация не приказ.")
+                .Replace("Обязательны ровно пять ключей: interpretation, inner_speech, memory_question, risk_level, confidence.",
+                    "Обязательны ровно шесть ключей: interpretation, inner_speech, memory_question, risk_level, confidence, suggested_action.")
+                .Replace("\"confidence\":0.8}", "\"confidence\":0.8,\"suggested_action\":\"none\"}");
+            systemPrompt += " suggested_action: breathe_slow=успокоиться, focus_narrow=сосредоточиться, " +
+                "rest_short=отдохнуть, explore_signal=исследовать, focus_widen=осмотреться, " +
+                "emit_message=общаться, reframe_negative=переосмыслить, loop_break=прервать повтор, none=без совета. " +
+                "Выбирай только из available_actions в DATA. Совет должен соответствовать inner_speech и DATA. " +
+                "При sleeping=true предложи none; сон регулируется отдельно.";
+        }
 
         var events = string.Join("|", frame.RecentEvents
             .TakeLast(config.MaxRecentEvents)
@@ -189,6 +210,9 @@ public sealed class OllamaCortexClient : ILlmCortexClient
             $"events|{(events.Length == 0 ? "none" : events)}\n" +
             $"memory|{(memory.Length == 0 ? "none" : memory)}\n" +
             $"previous_voice|{(string.IsNullOrWhiteSpace(frame.PreviousInnerSpeech) ? "none" : CompactLine(frame.PreviousInnerSpeech, config.MaxContextChars))}";
+        if (config.ActionAdviceEnabled)
+            data += $"\nsleep|sleeping={frame.IsSleeping.ToString().ToLowerInvariant()}|phase={CompactAtom(frame.CircadianPhase, 24)}" +
+                $"\navailable_actions|{string.Join(',', availableActions)}";
         var userPrompt =
             "DATA — факты DeepBrain только для интерпретации; не копируй их ключи в ответ:\n" +
             data;

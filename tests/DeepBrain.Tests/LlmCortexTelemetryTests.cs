@@ -14,6 +14,48 @@ namespace DeepBrain.Tests;
 public sealed class LlmCortexTelemetryTests
 {
     [Fact]
+    public async Task ActionAdviceSchemaAndSourceContextReachTheDecisionCallback()
+    {
+        var insight = new CognitiveInsight("ok", "Исследую", "", "low", 0.9) { SuggestedAction = "explore_signal" };
+        var handler = new CapturingHandler(JsonSerializer.Serialize(new
+        {
+            message = new { content = JsonSerializer.Serialize(insight) }
+        }));
+        using var http = new HttpClient(handler);
+        await using var client = new OllamaCortexClient(http);
+        var config = new LlmConfig { Enable = true, ActionAdviceEnabled = true, PersistJournal = false };
+        var captured = new TaskCompletionSource<CognitiveInsightEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var orchestrator = new LlmCortexOrchestrator(() => config, () => Array.Empty<string>(),
+            value => captured.TrySetResult(value), _ => { }, client);
+        orchestrator.Start(CancellationToken.None);
+        orchestrator.PublishState(BuildState(100) with
+        {
+            CortexContextId = "run:episode:awake",
+            Decision = new DecisionDto("focus_widen", "internal", "test", "ok", "net")
+            { CandidateActions = new[] { "explore_signal", "focus_widen" } }
+        });
+        Assert.True(orchestrator.TryQueueObservation("test", out _));
+        var envelope = await captured.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("run:episode:awake", envelope.SourceContextId);
+        Assert.Equal("explore_signal", envelope.Insight.SuggestedAction);
+        using var document = JsonDocument.Parse(handler.RequestBody!);
+        var root = document.RootElement;
+        var required = root.GetProperty("format").GetProperty("required").EnumerateArray().Select(p => p.GetString()).ToArray();
+        Assert.Equal(6, required.Length); Assert.Contains("suggested_action", required);
+        var actions = root.GetProperty("format").GetProperty("properties").GetProperty("suggested_action")
+            .GetProperty("enum").EnumerateArray().Select(a => a.GetString()).ToArray();
+        Assert.Equal(new[] { "explore_signal", "focus_widen", "none" }, actions);
+        var prompt = root.GetProperty("messages")[0].GetProperty("content").GetString();
+        Assert.Contains("ровно шесть ключей", prompt);
+        Assert.DoesNotContain("Не выбирай действия", prompt);
+        Assert.Contains("sleeping=false", root.GetProperty("messages")[1].GetProperty("content").GetString());
+        Assert.Contains("available_actions|explore_signal,focus_widen,none", root.GetProperty("messages")[1].GetProperty("content").GetString());
+        var advisor = new CortexActionAdvisor(); advisor.Accept(envelope);
+        var scores = new Dictionary<string, double> { ["explore_signal"] = 0.2 };
+        Assert.Equal("applied", advisor.Apply(config, 101, "run:episode:awake", false, 1, 0, scores).Status);
+    }
+
+    [Fact]
     public async Task OllamaRequestIsCompactAndReportsGenerationMetrics()
     {
         const string insightJson = """
