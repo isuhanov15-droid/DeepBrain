@@ -36,7 +36,8 @@ public sealed record BrainConfig(
     LlmConfig? Llm = null,
     ExternalApiConfig? ExternalApi = null,
     PlanningConfig? Planning = null,
-    CognitiveDynamicsConfig? CognitiveDynamics = null)
+    CognitiveDynamicsConfig? CognitiveDynamics = null,
+    ContinuityConfig? Continuity = null)
 {
     public static BrainConfig Default => new(
         new WorldConfig(

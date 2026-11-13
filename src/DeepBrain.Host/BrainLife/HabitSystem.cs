@@ -52,7 +52,7 @@ public sealed record HabitSystemStatus(
 /// separately. Strength changes only from the routine's reward advantage over
 /// the cue baseline, and the complete state is persisted atomically.
 /// </summary>
-public sealed class HabitSystem
+public sealed partial class HabitSystem
 {
     private const int SchemaVersion = 3;
     private readonly object _gate = new();

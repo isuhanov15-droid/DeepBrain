@@ -1,17 +1,16 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class MessageDedupeGuard
+public sealed partial class MessageDedupeGuard
 {
     private long _lastTick = -1000;
-    private int _lastHash;
+    private string? _lastMessage;
 
     public bool ShouldPublish(long tick, string message)
     {
-        var hash = message.GetHashCode(StringComparison.Ordinal);
-        if (hash == _lastHash && tick - _lastTick < 60)
+        if (string.Equals(message, _lastMessage, StringComparison.Ordinal) && tick - _lastTick < 60)
             return false;
 
-        _lastHash = hash;
+        _lastMessage = message;
         _lastTick = tick;
         return true;
     }

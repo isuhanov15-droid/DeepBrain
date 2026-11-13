@@ -2,7 +2,7 @@ using DeepBrain.Shared.Brain;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class EpisodeMemory
+public sealed partial class EpisodeMemory
 {
     private readonly List<EpisodeDto> _episodes = new(1000);
     private readonly List<MemoryRecord> _records = new(1000);

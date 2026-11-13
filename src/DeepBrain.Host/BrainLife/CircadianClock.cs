@@ -2,7 +2,7 @@ using DeepBrain.Shared.BrainDtos.V3;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class CircadianClock
+public sealed partial class CircadianClock
 {
     private const double DayLengthSeconds = 240.0;
     private const double SleepPressureGain = 0.003;

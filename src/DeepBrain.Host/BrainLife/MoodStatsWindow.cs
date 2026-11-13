@@ -2,7 +2,7 @@ using DeepBrain.Shared.BrainDtos.V6;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class MoodStatsWindow
+public sealed partial class MoodStatsWindow
 {
     private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
     private int _total;

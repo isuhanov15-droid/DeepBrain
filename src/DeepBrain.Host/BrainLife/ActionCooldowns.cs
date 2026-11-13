@@ -1,6 +1,6 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class ActionCooldowns
+public sealed partial class ActionCooldowns
 {
     private readonly Dictionary<string, long> _lastTick = new(StringComparer.Ordinal);
 

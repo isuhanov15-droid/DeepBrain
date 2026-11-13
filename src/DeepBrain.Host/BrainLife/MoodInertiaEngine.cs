@@ -2,7 +2,7 @@ using DeepBrain.Shared.Brain;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class MoodInertiaEngine
+public sealed partial class MoodInertiaEngine
 {
     private string _currentMood = "calm";
     private string _candidateMood = "calm";

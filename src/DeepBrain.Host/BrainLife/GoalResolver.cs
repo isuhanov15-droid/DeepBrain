@@ -3,7 +3,7 @@ using DeepBrain.Shared.BrainDtos.V3;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class GoalResolver
+public sealed partial class GoalResolver
 {
     private readonly Dictionary<string, double> _satisfaction = new()
     {

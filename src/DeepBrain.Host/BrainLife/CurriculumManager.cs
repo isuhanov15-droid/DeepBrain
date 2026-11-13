@@ -2,9 +2,10 @@ using System.Linq;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class CurriculumManager
+public sealed partial class CurriculumManager
 {
-    private readonly Random _rng;
+    private Random _rng;
+    private readonly int _continuitySeed;
     private readonly List<ScenarioDefinition> _scenarios = new();
     private string _mode = "fixed";
     private double _rewardGateThreshold;
@@ -13,6 +14,8 @@ public sealed class CurriculumManager
     public CurriculumManager(int seed)
     {
         _rng = new Random(seed);
+        _continuitySeed = seed;
+        _continuitySeed = seed;
     }
 
     public string Mode => _mode;

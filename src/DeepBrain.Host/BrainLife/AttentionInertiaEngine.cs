@@ -2,7 +2,7 @@ using DeepBrain.Shared.BrainDtos.V4;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class AttentionInertiaEngine
+public sealed partial class AttentionInertiaEngine
 {
     private readonly double _switchThreshold;
     private readonly int _holdTicks;

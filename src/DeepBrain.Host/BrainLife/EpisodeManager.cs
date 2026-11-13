@@ -1,6 +1,6 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class EpisodeManager
+public sealed partial class EpisodeManager
 {
     private int _episodeId;
     private int _episodeTick;

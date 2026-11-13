@@ -1,6 +1,6 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class LearningEngine
+public sealed partial class LearningEngine
 {
     private readonly Dictionary<string, double> _emaReward = new();
     private const double Alpha = 0.1;

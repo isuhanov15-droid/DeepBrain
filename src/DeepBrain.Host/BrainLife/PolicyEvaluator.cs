@@ -2,7 +2,7 @@ using System.Linq;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class PolicyEvaluator
+public sealed partial class PolicyEvaluator
 {
     private readonly Queue<EpisodeReport> _training = new();
     private readonly Queue<EpisodeReport> _evaluation = new();

@@ -42,6 +42,8 @@ public sealed record LifeStateDto(
     [property: JsonPropertyName("loopInfo")] LoopInfoDto? LoopInfo = null
 )
 {
+    [JsonPropertyName("continuity")]
+    public ContinuityStateDto? Continuity { get; init; }
     [JsonPropertyName("cortexContextId")]
     public string CortexContextId { get; init; } = "";
     [JsonPropertyName("executive")]

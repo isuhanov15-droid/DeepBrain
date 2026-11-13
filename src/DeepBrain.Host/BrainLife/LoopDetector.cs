@@ -1,6 +1,6 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class LoopDetector
+public sealed partial class LoopDetector
 {
     private readonly Queue<double> _recentRewards = new();
     private readonly Queue<string> _recentActions = new();

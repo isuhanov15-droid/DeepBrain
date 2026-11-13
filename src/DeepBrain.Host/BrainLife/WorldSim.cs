@@ -1,8 +1,9 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class WorldSim
+public sealed partial class WorldSim
 {
-    private readonly Random _rng;
+    private Random _rng;
+    private readonly int _continuitySeed;
     private readonly WorldEventsQueue _events = new();
     private long _lastThreatTick = -1000;
     private string _lastMajorEvent = "none";
@@ -31,6 +32,8 @@ public sealed class WorldSim
     public WorldSim(int seed)
     {
         _rng = new Random(seed);
+        _continuitySeed = seed;
+        _continuitySeed = seed;
     }
 
     public IReadOnlyList<DeepBrain.Shared.BrainDtos.V4.WorldEventDto> Tick(long tick, string phase, double sleepPressure, bool isSleeping, double dtSeconds, double attachmentLevel, WorldConfig config)

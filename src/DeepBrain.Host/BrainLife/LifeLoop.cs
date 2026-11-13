@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.IO;
 using System.Globalization;
 using DeepBrain.Host.BrainLife.Ml;
@@ -12,7 +12,7 @@ using DeepBrain.Shared.Trace;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class LifeLoop
+public sealed partial class LifeLoop
 {
     private readonly WorldSim _world;
     private readonly HomeostasisEngine _homeostasis;
@@ -39,7 +39,7 @@ public sealed class LifeLoop
     private readonly CortexActionAdvisor _cortexActions = new();
     private long _cortexContextEpoch;
     private string CortexContextId => $"{_runId}:{_episode.EpisodeId}:{_cortexContextEpoch}";
-    public void AcceptCortexInsight(CognitiveInsightEnvelope insight) => _cortexActions.Accept(insight);
+    public void AcceptCortexInsight(CognitiveInsightEnvelope insight) { lock (_runtimeGate) { _cortexActions.Accept(insight); } }
     private readonly GoalResolver _goals = new();
     private readonly PlanEngine _plan = new();
     private readonly ExecutivePlanner _executive;
@@ -60,7 +60,8 @@ public sealed class LifeLoop
     private readonly CurriculumManager _curriculum;
     private readonly ScenarioScorer _scenarioScorer = new();
     private readonly PolicyEvaluator _policyEvaluator;
-    private (float[] State, int Action, float Reward)? _pendingMlTransition;
+    private PendingLearningTransition? _pendingMlTransition;
+    private sealed record PendingLearningTransition(float[] State, int Action, float Reward);
     private readonly EpisodeReportWriter _reportWriter = new();
     private readonly IMlPolicyAdvisor _ml;
     private readonly string _runId = Guid.NewGuid().ToString("N");
@@ -169,6 +170,7 @@ public sealed class LifeLoop
         _output = output;
         _log = log;
         var (cfg, _) = _configLoader.GetCurrent();
+        var runtimeCheckpoint = RuntimeCheckpoint.LoadAndValidate(cfg);
         _executive = new ExecutivePlanner(_log);
         _executive.Configure(cfg.Planning ?? PlanningConfig.Default);
         _cognition = new CognitiveDynamics(_log);
@@ -176,287 +178,349 @@ public sealed class LifeLoop
         _habits = new HabitSystem(_log);
         _habits.Configure(cfg.Habits ?? HabitConfig.Default);
         _longTermMemory = new PersistentEpisodicMemory(_log);
-        _longTermMemory.Configure(cfg.Memory ?? MemoryConfig.Default);
+        if (runtimeCheckpoint is null) _longTermMemory.Configure(cfg.Memory ?? MemoryConfig.Default);
+        else _longTermMemory.ConfigureForContinuity(cfg.Memory ?? MemoryConfig.Default);
         _episode = new EpisodeManager(cfg.Episode.MaxSteps);
         _curriculum = new CurriculumManager(cfg.Ml.Seed);
         _policyEvaluator = new PolicyEvaluator(_scenarioScorer);
         _ml = mlAdvisor ?? MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
+        InitializeContinuity(cfg, runtimeCheckpoint);
     }
 
-    public void Start() => _running = true;
-    public void Stop() => _running = false;
-    public void Step() => _stepRequested = true;
+    public void Start() { lock (_runtimeGate) { _running = true; } }
+    public void Stop() { lock (_runtimeGate) { _running = false; } }
+    public void Step() { lock (_runtimeGate) { _stepRequested = true; } }
     public void ResetMl()
     {
-        var (cfg, _) = _configLoader.GetCurrent();
-        var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
-        _pendingMlTransition = null;
-        _ml.Reset(mlCfg);
-        _ml.ResetCounters();
-        _mlLoaded = true;
-        TryDeleteCheckpoint(mlCfg.CheckpointPath);
-        _log("ML сброшен");
+        lock (_runtimeGate)
+        {
+            var (cfg, _) = _configLoader.GetCurrent();
+            var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
+            _pendingMlTransition = null;
+            _ml.Reset(mlCfg);
+            _ml.ResetCounters();
+            _mlLoaded = true;
+            TryDeleteCheckpoint(mlCfg.CheckpointPath);
+            _log("ML сброшен");
+        }
     }
 
     public void RequestEpisodeReset()
     {
-        _episode.RequestManualReset();
+        lock (_runtimeGate)
+        {
+            _episode.RequestManualReset();
+        }
     }
 
-    public IReadOnlyList<string> ListScenarios() => _curriculum.ListScenarios();
+    public IReadOnlyList<string> ListScenarios() { lock (_runtimeGate) { return _curriculum.ListScenarios(); } }
 
     public bool TrySetScenario(string name)
     {
-        if (!_curriculum.TrySetScenario(name)) return false;
-        _executive.RememberScenario(_curriculum.ScenarioName, _episode.EpisodeId);
-        return true;
+        lock (_runtimeGate)
+        {
+            if (!_curriculum.TrySetScenario(name)) return false;
+            _executive.RememberScenario(_curriculum.ScenarioName, _episode.EpisodeId);
+            return true;
+        }
     }
 
     public void SetCurriculumMode(string mode)
     {
-        _curriculumModeOverride = mode?.Trim().ToLowerInvariant() ?? "";
-        _curriculum.SetMode(_curriculumModeOverride);
+        lock (_runtimeGate)
+        {
+            _curriculumModeOverride = mode?.Trim().ToLowerInvariant() ?? "";
+            _curriculum.SetMode(_curriculumModeOverride);
+        }
     }
 
     public void NextScenario()
     {
-        if (_curriculum.Advance(double.PositiveInfinity))
-            _executive.RememberScenario(_curriculum.ScenarioName, _episode.EpisodeId);
+        lock (_runtimeGate)
+        {
+            if (_curriculum.Advance(double.PositiveInfinity))
+                _executive.RememberScenario(_curriculum.ScenarioName, _episode.EpisodeId);
+        }
     }
 
     public void SetMlMode(string mode)
     {
-        _mlModeOverride = mode?.Trim().ToLowerInvariant() ?? "";
+        lock (_runtimeGate)
+        {
+            _mlModeOverride = mode?.Trim().ToLowerInvariant() ?? "";
+        }
     }
 
     public string GetMlStatus()
     {
-        var (cfg, _) = _configLoader.GetCurrent();
-        var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
-        var backendKind = (mlCfg.Backend ?? "off").Trim().ToLowerInvariant();
-        var (enabled, reason) = ComputeMlEnabled(mlCfg, backendKind, mlCfg.RemoteStrict, _ml.TryConnectRemote());
-        var mlMode = ResolveMlMode(mlCfg);
-        var trainEnabled = mlMode != "evaluation" && enabled;
-        var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount);
-        var lastError = string.IsNullOrWhiteSpace(t.LastRemoteError)
-            ? "нет"
-            : RussianDisplay.Token(t.LastRemoteError);
-        var disabledReason = enabled
-            ? "не применимо"
-            : RussianDisplay.Token(reason);
-        return $"включён={RussianDisplay.YesNo(enabled)} " +
-               $"backend={RussianDisplay.Token(t.BackendKind)} " +
-               $"локальное ядро доступно={RussianDisplay.YesNo(t.CoreAvailable)} " +
-               $"удалённое соединение={RussianDisplay.YesNo(t.RemoteConnected)} " +
-               $"RTT={t.RttMs:0} мс " +
-               $"режим={RussianDisplay.Token(t.MlMode)} " +
-               $"обучение={RussianDisplay.YesNo(t.TrainEnabled)} " +
-               $"источник={RussianDisplay.Token(t.PolicySource)} " +
-               $"буфер={t.BufferSize}/{t.BufferCapacity} " +
-               $"шаги={t.TrainSteps} " +
-               $"ε={t.Epsilon:0.000} " +
-               $"вес сети={t.NetWeight:0.00} " +
-               $"loss={t.LastLoss:0.000} " +
-               $"последняя ошибка={lastError} " +
-               $"причина отключения={disabledReason}";
+        lock (_runtimeGate)
+        {
+            var (cfg, _) = _configLoader.GetCurrent();
+            var mlCfg = cfg.Ml with { Enable = cfg.Ml.Enable || cfg.UseMlAdvisor };
+            var backendKind = (mlCfg.Backend ?? "off").Trim().ToLowerInvariant();
+            var (enabled, reason) = ComputeMlEnabled(mlCfg, backendKind, mlCfg.RemoteStrict, _ml.TryConnectRemote());
+            var mlMode = ResolveMlMode(mlCfg);
+            var trainEnabled = mlMode != "evaluation" && enabled;
+            var t = _ml.BuildTelemetry(enabled, MlCoreAvailability.IsAvailable, StateVectorizer.InputDim, ActionCatalog.Count, _avgReward200, reason, mlMode, trainEnabled, _trainingEpisodeCount, _evalEpisodeCount);
+            var lastError = string.IsNullOrWhiteSpace(t.LastRemoteError)
+                ? "нет"
+                : RussianDisplay.Token(t.LastRemoteError);
+            var disabledReason = enabled
+                ? "не применимо"
+                : RussianDisplay.Token(reason);
+            return $"включён={RussianDisplay.YesNo(enabled)} " +
+                   $"backend={RussianDisplay.Token(t.BackendKind)} " +
+                   $"локальное ядро доступно={RussianDisplay.YesNo(t.CoreAvailable)} " +
+                   $"удалённое соединение={RussianDisplay.YesNo(t.RemoteConnected)} " +
+                   $"RTT={t.RttMs:0} мс " +
+                   $"режим={RussianDisplay.Token(t.MlMode)} " +
+                   $"обучение={RussianDisplay.YesNo(t.TrainEnabled)} " +
+                   $"источник={RussianDisplay.Token(t.PolicySource)} " +
+                   $"буфер={t.BufferSize}/{t.BufferCapacity} " +
+                   $"шаги={t.TrainSteps} " +
+                   $"ε={t.Epsilon:0.000} " +
+                   $"вес сети={t.NetWeight:0.00} " +
+                   $"loss={t.LastLoss:0.000} " +
+                   $"последняя ошибка={lastError} " +
+                   $"причина отключения={disabledReason}";
+        }
     }
 
-    public bool TryConnectMl() => _ml.TryConnectRemote();
-    public void DisconnectMl() => _ml.DisconnectRemote();
+    public bool TryConnectMl() { lock (_runtimeGate) { return _ml.TryConnectRemote(); } }
+    public void DisconnectMl() { lock (_runtimeGate) { _ml.DisconnectRemote(); } }
     public string RunId => _runId;
 
     public string GetHabitStatus()
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _habits.Configure(config.Habits ?? HabitConfig.Default);
-        var status = _habits.GetStatus();
-        return $"включены={RussianDisplay.YesNo(status.Enabled)} " +
-               $"загружены={RussianDisplay.YesNo(status.Loaded)} " +
-               $"импорт v1.3={RussianDisplay.YesNo(status.ImportedLegacySnapshot)} " +
-               $"привычек={status.HabitCount} часы привычек={status.ClockTick} несохранённых обновлений={status.DirtyUpdates} " +
-               $"сохранений={status.SaveCount} последняя запись={status.LastSavedAt?.ToString("O") ?? "нет"} " +
-               $"ошибка={status.LastError ?? "нет"} путь={status.Path}";
+        lock (_runtimeGate)
+        {
+            var (config, _) = _configLoader.GetCurrent();
+            _habits.Configure(config.Habits ?? HabitConfig.Default);
+            var status = _habits.GetStatus();
+            return $"включены={RussianDisplay.YesNo(status.Enabled)} " +
+                   $"загружены={RussianDisplay.YesNo(status.Loaded)} " +
+                   $"импорт v1.3={RussianDisplay.YesNo(status.ImportedLegacySnapshot)} " +
+                   $"привычек={status.HabitCount} часы привычек={status.ClockTick} несохранённых обновлений={status.DirtyUpdates} " +
+                   $"сохранений={status.SaveCount} последняя запись={status.LastSavedAt?.ToString("O") ?? "нет"} " +
+                   $"ошибка={status.LastError ?? "нет"} путь={status.Path}";
+        }
     }
 
     public IReadOnlyList<string> GetHabitStatsLines()
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _habits.Configure(config.Habits ?? HabitConfig.Default);
-        _habits.AdvanceTime(_tick);
-        return _habits.GetTopHabits(20).Select(FormatHabitLine).ToList();
+        lock (_runtimeGate)
+        {
+            var (config, _) = _configLoader.GetCurrent();
+            _habits.Configure(config.Habits ?? HabitConfig.Default);
+            _habits.AdvanceTime(_tick);
+            return _habits.GetTopHabits(20).Select(FormatHabitLine).ToList();
+        }
     }
 
     public IReadOnlyList<string> ExplainHabitLines(string? idOrCue)
     {
-        if (string.IsNullOrWhiteSpace(idOrCue))
-            return GetHabitStatsLines();
-        var habit = _habits.GetHabit(idOrCue);
-        return habit is null
-            ? new[] { $"привычка не найдена: {idOrCue}" }
-            : new[] { FormatHabitLine(habit) };
+        lock (_runtimeGate)
+        {
+            if (string.IsNullOrWhiteSpace(idOrCue))
+                return GetHabitStatsLines();
+            var habit = _habits.GetHabit(idOrCue);
+            return habit is null
+                ? new[] { $"привычка не найдена: {idOrCue}" }
+                : new[] { FormatHabitLine(habit) };
+        }
     }
 
     public string GetCharacterStatus()
     {
-        return $"персона={_personality.Persona.PersonaId} " +
-               $"активный сигнал={RussianDisplay.Token(_activeHabitCue)} " +
-               $"активная привычка={RussianDisplay.Token(_activeHabitId ?? "нет")} " +
-               $"влияние={_activeHabitInfluence:0.000}; {GetHabitStatus()}";
+        lock (_runtimeGate)
+        {
+            return $"персона={_personality.Persona.PersonaId} " +
+                   $"активный сигнал={RussianDisplay.Token(_activeHabitCue)} " +
+                   $"активная привычка={RussianDisplay.Token(_activeHabitId ?? "нет")} " +
+                   $"влияние={_activeHabitInfluence:0.000}; {GetHabitStatus()}";
+        }
     }
 
     public void FlushPersistentState()
     {
-        _executive.Flush();
-        _cognition.Flush();
-        _habits.Flush();
-        _reportWriter.CompleteAsync().GetAwaiter().GetResult();
-        var (cfg, _) = _configLoader.GetCurrent();
-        if (_mlLoaded && (cfg.Ml.Enable || cfg.UseMlAdvisor))
-            _ml.TrySave(cfg.Ml.CheckpointPath, _episode.EpisodeId);
+        lock (_runtimeGate)
+        {
+            var (cfg, _) = _configLoader.GetCurrent();
+            if (cfg.Continuity?.Enable == true)
+                SaveRuntimeCheckpoint(cfg);
+            else
+            {
+                _executive.Flush(); _cognition.Flush(); _habits.Flush();
+                if (_mlLoaded && (cfg.Ml.Enable || cfg.UseMlAdvisor))
+                    _ml.TrySave(cfg.Ml.CheckpointPath, _episode.EpisodeId);
+            }
+            _reportWriter.CompleteAsync().GetAwaiter().GetResult();
+        }
     }
 
     public string GetMemoryStatus()
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        var status = _longTermMemory.GetStatus();
-        var lastStored = status.LastStoredAt?.ToString("O") ?? "нет";
-        var lastError = string.IsNullOrWhiteSpace(status.LastError) ? "нет" : status.LastError;
-        return $"включена={RussianDisplay.YesNo(status.Enabled)} " +
-               $"записей={status.EpisodeCount}/{status.Capacity} " +
-               $"эпизодов={status.RepresentedEpisodes} " +
-               $"опыт сценариев={status.ScenarioExperiences} " +
-               $"индекс={status.IndexedBuckets} кандидатов={status.LastCandidateCount} " +
-               $"запросов воспоминаний={status.RecallRequests} " +
-               $"последний поиск={status.LastRecallCount} " +
-               $"сходство={status.LastBestSimilarity:0.000} " +
-               $"объединено={status.DuplicateMerges} забыто={status.ForgottenEntries} " +
-               $"консолидаций={status.ConsolidationRuns} " +
-               $"последняя запись={lastStored} " +
-               $"повреждённых строк={status.InvalidLines} " +
-               $"ошибка={lastError} " +
-               $"путь={status.Path}";
+        lock (_runtimeGate)
+        {
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            var status = _longTermMemory.GetStatus();
+            var lastStored = status.LastStoredAt?.ToString("O") ?? "нет";
+            var lastError = string.IsNullOrWhiteSpace(status.LastError) ? "нет" : status.LastError;
+            return $"включена={RussianDisplay.YesNo(status.Enabled)} " +
+                   $"записей={status.EpisodeCount}/{status.Capacity} " +
+                   $"эпизодов={status.RepresentedEpisodes} " +
+                   $"опыт сценариев={status.ScenarioExperiences} " +
+                   $"индекс={status.IndexedBuckets} кандидатов={status.LastCandidateCount} " +
+                   $"запросов воспоминаний={status.RecallRequests} " +
+                   $"последний поиск={status.LastRecallCount} " +
+                   $"сходство={status.LastBestSimilarity:0.000} " +
+                   $"объединено={status.DuplicateMerges} забыто={status.ForgottenEntries} " +
+                   $"консолидаций={status.ConsolidationRuns} " +
+                   $"последняя запись={lastStored} " +
+                   $"повреждённых строк={status.InvalidLines} " +
+                   $"ошибка={lastError} " +
+                   $"путь={status.Path}";
+        }
     }
 
     public IReadOnlyList<string> GetRecentMemoryLines(int count)
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        return _longTermMemory.GetRecent(count).Select(FormatMemoryEntry).ToList();
+        lock (_runtimeGate)
+        {
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            return _longTermMemory.GetRecent(count).Select(FormatMemoryEntry).ToList();
+        }
     }
 
     public IReadOnlyList<string> SearchMemoryLines(string query, int count)
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        return _longTermMemory.Search(query, count).Select(FormatMemoryEntry).ToList();
+        lock (_runtimeGate)
+        {
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            return _longTermMemory.Search(query, count).Select(FormatMemoryEntry).ToList();
+        }
     }
 
     public IReadOnlyList<string> GetMemoryStatsLines()
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        var stats = _longTermMemory.GetStatistics();
-        var lines = new List<string>
+        lock (_runtimeGate)
         {
-            $"записей={stats.EntryCount} представлено эпизодов={stats.RepresentedEpisodes} " +
-            $"сценариев={stats.ScenarioCount} устойчивых={stats.MatureScenarioCount} " +
-            $"индекс={stats.IndexBuckets} кандидатов последнего поиска={stats.LastCandidateCount}",
-            $"объединено={stats.DuplicateMerges} забыто={stats.ForgottenEntries} " +
-            $"консолидаций={stats.ConsolidationRuns} средняя значимость={stats.AverageSalience:0.000} " +
-            $"средняя сила={stats.AverageStrength:0.000} опыт={stats.ExperiencePath}"
-        };
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            var stats = _longTermMemory.GetStatistics();
+            var lines = new List<string>
+            {
+                $"записей={stats.EntryCount} представлено эпизодов={stats.RepresentedEpisodes} " +
+                $"сценариев={stats.ScenarioCount} устойчивых={stats.MatureScenarioCount} " +
+                $"индекс={stats.IndexBuckets} кандидатов последнего поиска={stats.LastCandidateCount}",
+                $"объединено={stats.DuplicateMerges} забыто={stats.ForgottenEntries} " +
+                $"консолидаций={stats.ConsolidationRuns} средняя значимость={stats.AverageSalience:0.000} " +
+                $"средняя сила={stats.AverageStrength:0.000} опыт={stats.ExperiencePath}"
+            };
 
-        foreach (var experience in _longTermMemory.GetScenarioExperiences())
-        {
-            lines.Add($"сценарий={RussianDisplay.Token(experience.ScenarioName)} " +
-                      $"эпизодов={experience.EpisodeCount} успех={experience.SuccessRate:P0} " +
-                      $"награда={experience.AvgReward:0.000} уверенность={experience.Confidence:0.000} " +
-                      $"помогло={RussianDisplay.Token(experience.HelpfulAction ?? "нет")} " +
-                      $"мешало={RussianDisplay.Token(experience.HarmfulAction ?? "нет")}");
+            foreach (var experience in _longTermMemory.GetScenarioExperiences())
+            {
+                lines.Add($"сценарий={RussianDisplay.Token(experience.ScenarioName)} " +
+                          $"эпизодов={experience.EpisodeCount} успех={experience.SuccessRate:P0} " +
+                          $"награда={experience.AvgReward:0.000} уверенность={experience.Confidence:0.000} " +
+                          $"помогло={RussianDisplay.Token(experience.HelpfulAction ?? "нет")} " +
+                          $"мешало={RussianDisplay.Token(experience.HarmfulAction ?? "нет")}");
+            }
+
+            return lines;
         }
-
-        return lines;
     }
 
     public IReadOnlyList<string> ExplainMemoryLines(string? scenario)
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        var cue = new MemoryCue(
-            string.IsNullOrWhiteSpace(scenario) ? _scenarioName : scenario.Trim(),
-            _affect.Mood,
-            _homeo.Pain,
-            _homeo.Safety,
-            _homeo.Arousal);
-        var explanation = _longTermMemory.Explain(cue);
-        var lines = new List<string>
+        lock (_runtimeGate)
         {
-            $"сценарий={RussianDisplay.Token(cue.ScenarioName)} настроение={RussianDisplay.Token(cue.Mood)} " +
-            $"кандидатов={explanation.IndexedCandidates} воспоминаний={explanation.RecalledEpisodes} " +
-            $"сходство={explanation.BestSimilarity:0.000} уверенность={explanation.Confidence:0.000}",
-            $"что помогло={RussianDisplay.Token(explanation.HelpfulAction ?? "нет")} " +
-            $"влияние={explanation.HelpfulScore:+0.000;-0.000;0.000} " +
-            $"что мешало={RussianDisplay.Token(explanation.HarmfulAction ?? "нет")} " +
-            $"влияние={explanation.HarmfulScore:+0.000;-0.000;0.000}"
-        };
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            var cue = new MemoryCue(
+                string.IsNullOrWhiteSpace(scenario) ? _scenarioName : scenario.Trim(),
+                _affect.Mood,
+                _homeo.Pain,
+                _homeo.Safety,
+                _homeo.Arousal);
+            var explanation = _longTermMemory.Explain(cue);
+            var lines = new List<string>
+            {
+                $"сценарий={RussianDisplay.Token(cue.ScenarioName)} настроение={RussianDisplay.Token(cue.Mood)} " +
+                $"кандидатов={explanation.IndexedCandidates} воспоминаний={explanation.RecalledEpisodes} " +
+                $"сходство={explanation.BestSimilarity:0.000} уверенность={explanation.Confidence:0.000}",
+                $"что помогло={RussianDisplay.Token(explanation.HelpfulAction ?? "нет")} " +
+                $"влияние={explanation.HelpfulScore:+0.000;-0.000;0.000} " +
+                $"что мешало={RussianDisplay.Token(explanation.HarmfulAction ?? "нет")} " +
+                $"влияние={explanation.HarmfulScore:+0.000;-0.000;0.000}"
+            };
 
-        if (explanation.ScenarioExperience is { } experience)
-        {
-            lines.Add($"устойчивый опыт: эпизодов={experience.EpisodeCount} успех={experience.SuccessRate:P0} " +
-                      $"средняя награда={experience.AvgReward:0.000} зрелый={RussianDisplay.YesNo(experience.IsMature)}");
+            if (explanation.ScenarioExperience is { } experience)
+            {
+                lines.Add($"устойчивый опыт: эпизодов={experience.EpisodeCount} успех={experience.SuccessRate:P0} " +
+                          $"средняя награда={experience.AvgReward:0.000} зрелый={RussianDisplay.YesNo(experience.IsMature)}");
+            }
+
+            lines.AddRange(explanation.Evidence.Select(item =>
+                $"свидетельство эпизод={item.EpisodeId} повторов={item.Occurrences} " +
+                $"сходство={item.Similarity:0.000} релевантность={item.Relevance:0.000} " +
+                $"успех={RussianDisplay.YesNo(item.ScenarioPassed)} награда={item.AvgReward:0.000} " +
+                $"помогло={RussianDisplay.Token(item.HelpfulAction ?? "нет")}"));
+            return lines;
         }
-
-        lines.AddRange(explanation.Evidence.Select(item =>
-            $"свидетельство эпизод={item.EpisodeId} повторов={item.Occurrences} " +
-            $"сходство={item.Similarity:0.000} релевантность={item.Relevance:0.000} " +
-            $"успех={RussianDisplay.YesNo(item.ScenarioPassed)} награда={item.AvgReward:0.000} " +
-            $"помогло={RussianDisplay.Token(item.HelpfulAction ?? "нет")}"));
-        return lines;
     }
 
     public IReadOnlyList<string> GetCortexMemoryLines()
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        var cue = new MemoryCue(
-            _scenarioName,
-            _affect.Mood,
-            _homeo.Pain,
-            _homeo.Safety,
-            _homeo.Arousal);
-        var explanation = _longTermMemory.Explain(cue);
-        var lines = new List<string>
+        lock (_runtimeGate)
         {
-            $"recall={explanation.RecalledEpisodes};sim={FormatCortexNumber(explanation.BestSimilarity)};" +
-            $"help={CompactCortexToken(explanation.HelpfulAction)};" +
-            $"helpScore={FormatCortexNumber(explanation.HelpfulScore)};" +
-            $"harm={CompactCortexToken(explanation.HarmfulAction)};" +
-            $"harmScore={FormatCortexNumber(explanation.HarmfulScore)};" +
-            $"conf={FormatCortexNumber(explanation.Confidence)}"
-        };
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            var cue = new MemoryCue(
+                _scenarioName,
+                _affect.Mood,
+                _homeo.Pain,
+                _homeo.Safety,
+                _homeo.Arousal);
+            var explanation = _longTermMemory.Explain(cue);
+            var lines = new List<string>
+            {
+                $"recall={explanation.RecalledEpisodes};sim={FormatCortexNumber(explanation.BestSimilarity)};" +
+                $"help={CompactCortexToken(explanation.HelpfulAction)};" +
+                $"helpScore={FormatCortexNumber(explanation.HelpfulScore)};" +
+                $"harm={CompactCortexToken(explanation.HarmfulAction)};" +
+                $"harmScore={FormatCortexNumber(explanation.HarmfulScore)};" +
+                $"conf={FormatCortexNumber(explanation.Confidence)}"
+            };
 
-        if (explanation.ScenarioExperience is { } experience)
-        {
-            lines.Add(
-                $"episodes={experience.EpisodeCount};" +
-                $"success={FormatCortexNumber(experience.SuccessRate)};" +
-                $"avg={FormatCortexNumber(experience.AvgReward)};" +
-                $"mature={(experience.IsMature ? 1 : 0)}");
+            if (explanation.ScenarioExperience is { } experience)
+            {
+                lines.Add(
+                    $"episodes={experience.EpisodeCount};" +
+                    $"success={FormatCortexNumber(experience.SuccessRate)};" +
+                    $"avg={FormatCortexNumber(experience.AvgReward)};" +
+                    $"mature={(experience.IsMature ? 1 : 0)}");
+            }
+
+            return lines;
         }
-
-        return lines;
     }
 
     public string ConsolidateMemory()
     {
-        var (config, _) = _configLoader.GetCurrent();
-        _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
-        var result = _longTermMemory.Consolidate();
-        return $"записей={result.EntriesBefore}→{result.EntriesAfter} " +
-               $"представлено эпизодов={result.RepresentedEpisodes} объединено={result.MergedEntries} " +
-               $"забыто={result.ForgottenEntries} опыт сценариев={result.ScenarioExperiences} " +
-               $"время={result.DurationMs} мс";
+        lock (_runtimeGate)
+        {
+            var (config, _) = _configLoader.GetCurrent();
+            _longTermMemory.Configure(config.Memory ?? MemoryConfig.Default);
+            var result = _longTermMemory.Consolidate();
+            return $"записей={result.EntriesBefore}→{result.EntriesAfter} " +
+                   $"представлено эпизодов={result.RepresentedEpisodes} объединено={result.MergedEntries} " +
+                   $"забыто={result.ForgottenEntries} опыт сценариев={result.ScenarioExperiences} " +
+                   $"время={result.DurationMs} мс";
+        }
     }
 
     private static (bool Enabled, string? Reason) ComputeMlEnabled(MlConfig cfg, string backendKind, bool remoteStrict, bool remoteConnected)
@@ -491,7 +555,6 @@ public sealed class LifeLoop
             if (_running || _stepRequested)
             {
                 TickOnce(dtSeconds, ct);
-                _stepRequested = false;
                 if (_running)
                     await Task.Delay(delayMs, ct);
             }
@@ -502,7 +565,7 @@ public sealed class LifeLoop
         }
     }
 
-    private void TickOnce(double dtSeconds, CancellationToken ct)
+    private void TickCore(double dtSeconds, CancellationToken ct)
     {
         var beforeHomeo = _homeo;
         var beforeAffect = _affect;
@@ -589,7 +652,7 @@ public sealed class LifeLoop
         // Without ML there is no outer checkpoint to restore the episode identity from.
         if (_tick == 0 && !_mlLoaded && _executive.SavedScenario is { } savedScenario)
             _episode.SetEpisodeId(savedScenario.EpisodeId);
-        if (mlConfig.Enable && _tick > 0 && _tick % 500 == 0)
+        if (config.Continuity?.Enable != true && mlConfig.Enable && _tick > 0 && _tick % 500 == 0)
         {
             try { _ml.TrySave(mlConfig.CheckpointPath, _episode.EpisodeId); }
             catch (Exception ex) { _log("ML checkpoint save failed: " + ex.Message); }
@@ -689,7 +752,7 @@ public sealed class LifeLoop
                 new CurriculumStateDto(_curriculumMode, _scenarioIndex),
                 new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
                 new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
-            ) { CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
+            ) { Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
             EmitTrace("tick", $"тик={_tick} эпизод={_episode.EpisodeId} действие=сон награда=0.000 петля=нет ε=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
@@ -971,7 +1034,7 @@ public sealed class LifeLoop
                 _ml.Observe(stateVec, actionIdx, (float)rewardDto.Total, stateVec,
                     true, new float[ActionCatalog.Count], mlConfigEffective, _tick);
             else
-                _pendingMlTransition = (stateVec, actionIdx, (float)rewardDto.Total);
+                _pendingMlTransition = new(stateVec, actionIdx, (float)rewardDto.Total);
         }
 
         if (action.Name == "loop_break")
@@ -1127,7 +1190,7 @@ public sealed class LifeLoop
             new CurriculumStateDto(_curriculumMode, _scenarioIndex),
             new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
             loopInfo
-        ) { CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
+        ) { Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
         EmitTrace("tick",
             $"тик={_tick} эпизод={_episode.EpisodeId} " +
             $"действие={RussianDisplay.Token(action.Name)} награда={rewardDto.Total:0.000} " +

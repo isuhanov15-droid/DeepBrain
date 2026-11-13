@@ -3,7 +3,7 @@ using DeepBrain.Shared.BrainDtos.V4;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class WorldEventsQueue
+public sealed partial class WorldEventsQueue
 {
     private readonly List<WorldEventDto> _events = new(50);
     private const int Capacity = 50;

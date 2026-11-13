@@ -3,7 +3,7 @@ using DeepBrain.Shared.BrainDtos.V3;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class SleepEngine
+public sealed partial class SleepEngine
 {
     public bool IsSleeping { get; private set; }
     public bool EnteredSleep { get; private set; }

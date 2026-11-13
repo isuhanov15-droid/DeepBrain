@@ -3,7 +3,7 @@ using DeepBrain.Shared.BrainDtos.V4;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class SemanticMemory
+public sealed partial class SemanticMemory
 {
     private sealed record Stat(double Sum, int Count)
     {

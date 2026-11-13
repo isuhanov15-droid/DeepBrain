@@ -159,7 +159,7 @@ public sealed record EpisodicMemoryStatus(
 /// scenario experience. Tick-time recall uses an in-memory state index and
 /// never scans the JSONL file.
 /// </summary>
-public sealed class PersistentEpisodicMemory
+public sealed partial class PersistentEpisodicMemory
 {
     private const int SchemaVersion = 1;
     private const int StateBucketCount = 5;
@@ -189,6 +189,7 @@ public sealed class PersistentEpisodicMemory
     private string _experiencePath = Path.GetFullPath(Path.Combine("memory", "experience.json"));
     private bool _configured;
     private bool _loaded;
+    private bool _continuityReadOnlyLoad;
     private int _invalidLines;
     private int _linesOnDisk;
     private int _representedEpisodes;
@@ -808,7 +809,12 @@ public sealed class PersistentEpisodicMemory
             RebuildDerivedLocked();
             _loaded = true;
             _lastStoredAt = _entries.Count > 0 ? _entries.Max(entry => entry.EndTs) : null;
-            if (evicted > 0 || _linesOnDisk > _entries.Count * 2 + 10)
+            if (_continuityReadOnlyLoad)
+            {
+                if (_invalidLines > 0 || evicted > 0)
+                    throw new InvalidDataException("Continuity memory cannot be loaded without changing its contents");
+            }
+            else if (evicted > 0 || _linesOnDisk > _entries.Count * 2 + 10)
                 CompactLocked();
             else
                 PersistExperienceLocked();
@@ -820,6 +826,7 @@ public sealed class PersistentEpisodicMemory
             _loaded = true;
             _lastError = ex.Message;
             _log($"ПАМЯТЬ: не удалось загрузить хранилище: {ex.Message}");
+            if (_continuityReadOnlyLoad) throw;
         }
     }
 

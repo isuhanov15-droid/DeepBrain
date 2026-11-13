@@ -12,7 +12,7 @@ public sealed record CognitiveObservation(string Scenario, HomeostasisDto Body, 
     double Threat, double Social, double LoopStrength, bool SocialPending, bool Sleeping = false);
 
 /// <summary>Bounded working memory, learned immediate effects and explainable affect; separate from ML checkpoints.</summary>
-public sealed class CognitiveDynamics
+public sealed partial class CognitiveDynamics
 {
     public static readonly string[] EmotionIds = { "calm", "curiosity", "joy", "fear", "sadness", "frustration", "surprise", "relief", "affection", "boredom" };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };

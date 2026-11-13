@@ -5,12 +5,13 @@ using DeepBrain.Shared.BrainDtos.V6;
 
 namespace DeepBrain.Host.BrainLife.Ml;
 
-public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
+public sealed partial class MlPolicyAdvisor : IMlPolicyAdvisor
 {
     private readonly StateVectorizer _vectorizer = new();
     private readonly Action<string> _log;
     private IBrainMlBackend _backend;
-    private readonly Random _rng;
+    private Random _rng;
+    private readonly int _continuitySeed;
 
     private readonly Queue<double> _lossWindow = new(100);
     private readonly Queue<bool> _overrideWindow = new(200);
@@ -39,6 +40,8 @@ public sealed class MlPolicyAdvisor : IMlPolicyAdvisor
     {
         _log = log;
         _rng = new Random(config.Seed);
+        _continuitySeed = config.Seed;
+        _continuitySeed = config.Seed;
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _backendKind = _backend.Kind;
     }

@@ -2,7 +2,7 @@ using DeepBrain.Shared.BrainDtos.V3;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class PlanEngine
+public sealed partial class PlanEngine
 {
     public PlanDto? ActivePlan { get; private set; }
     private string _lastGoalId = "";

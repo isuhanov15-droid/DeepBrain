@@ -1,6 +1,6 @@
 namespace DeepBrain.Host.BrainLife;
 
-public sealed class SelfTalkThrottle
+public sealed partial class SelfTalkThrottle
 {
     private long _cooldownTicks;
     private long _repeatCooldownTicks;
