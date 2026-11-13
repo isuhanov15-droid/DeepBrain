@@ -194,6 +194,20 @@ public sealed class CognitiveDynamics
             new Dictionary<string,double>(_biases), _sleeping, _lastError, _savedAt);
     }
 
+    public IReadOnlyList<StrategyEffectHint> StrategyHints()
+    {
+        lock (_gate)
+        {
+            if (!_config.Enable || _current is null || _sleeping) return Array.Empty<StrategyEffectHint>();
+            return (from goal in new[] { "restore_energy", "regulate", "explore", "focus" }
+                from action in ActionCatalog.Actions
+                let key = Key(_current.Scenario, action)
+                where _state.Models.TryGetValue(key, out var model) && model.Samples >= 4
+                let model = _state.Models[key]
+                select new StrategyEffectHint(goal, action, Utility(model.Effect, goal), Confidence(model))).ToArray();
+        }
+    }
+
     private void IntegrateOutcomes(IReadOnlyList<GoalOutcomeDto> outcomes)
     {
         if (_seedOutcomes) { foreach (var o in outcomes) _seenOutcomes.Add(o.PlanId); _seedOutcomes = false; return; }

@@ -12,4 +12,5 @@ public sealed record ExecutiveStateDto(bool Enabled, long AwakeClock, PlanDto? P
 {
     public string? SavedScenario { get; init; }
     public string ScenarioResumeStatus { get; init; } = "not_attempted";
+    public StrategyLearningDto? StrategyLearning { get; init; }
 }

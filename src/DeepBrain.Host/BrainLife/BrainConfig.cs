@@ -506,6 +506,7 @@ public sealed record HabitConfig
 public sealed record PlanningConfig
 {
     public bool Enable { get; init; }
+    public bool EnableStrategyLearning { get; init; }
     public string Path { get; init; } = "memory/planning.json";
     public int MaxPlanTicks { get; init; } = 180;
     public int CommitmentTicks { get; init; } = 20;

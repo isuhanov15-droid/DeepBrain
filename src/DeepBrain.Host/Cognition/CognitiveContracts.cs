@@ -58,6 +58,7 @@ public sealed record CognitiveFrame(
     public string EmotionContext { get; init; } = "";
     public string WorkingContext { get; init; } = "";
     public string ExpectationContext { get; init; } = "";
+    public string StrategyContext { get; init; } = "";
 }
 
 public sealed record CognitiveInsight(

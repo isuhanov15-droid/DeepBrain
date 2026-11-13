@@ -415,6 +415,8 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
             WorkingContext = state.Cognition?.Enabled == true ? Abbreviate(string.Join("; ",state.Cognition.WorkingMemory.Take(3).Select(m=>m.Text)),config.MaxContextChars) : "",
             ExpectationContext = state.Cognition?.Enabled == true && state.Cognition.Expectation is { } expected
                 ? $"{expected.Action}; samples={expected.Samples}; status={expected.Status}; confidence={expected.Confidence.ToString("0.00",System.Globalization.CultureInfo.InvariantCulture)}" : "",
+            StrategyContext = state.Executive?.StrategyLearning is { Enabled: true, Choice: { } choice }
+                ? Abbreviate($"{choice.Id}; why={choice.Reason}; attempts={choice.Samples}; action={state.Executive.PreferredAction}",config.MaxContextChars) : "",
             Energy = FiniteOrZero(state.Homeostasis.Energy),
             Fatigue = FiniteOrZero(state.Homeostasis.Fatigue),
             ExplorationNeed = FiniteOrZero(state.Instincts.Exploration),

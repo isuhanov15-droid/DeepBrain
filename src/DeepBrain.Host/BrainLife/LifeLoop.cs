@@ -749,8 +749,8 @@ public sealed class LifeLoop
         if (_executive.Enabled) goals = _personality.BiasGoals(goals, circ.Phase, recentEvents);
         goals = _cognition.BiasGoals(goals);
         var executiveBefore = new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo,
-            instincts.Agency, _world.Novelty, hasPendingSocialSignal);
-        var activePlan = _executive.Enabled ? _executive.Begin(goals, executiveBefore)
+            cognitiveBefore.Agency, _world.Novelty, hasPendingSocialSignal);
+        var activePlan = _executive.Enabled ? _executive.Begin(goals, executiveBefore, _cognition.StrategyHints())
             : _plan.Update(goals, dominantDrive, _loop.LoopPenalty, _sleep.IsSleeping, instincts.SelfPreservation);
         if (!_executive.Enabled && _plan.Created)
             _log($"ПЛАН СОЗДАН: {RussianDisplay.Token(activePlan?.Strategy)} " +
@@ -907,6 +907,7 @@ public sealed class LifeLoop
             _log("ML выбрал недопустимое действие; применён резервный выбор");
 
         var invalidAction = decision.IllegalChoice || !IsMaskAllowed(actionMask, action.Name);
+        action = _executive.AdjustAction(action, invalidAction);
         EmitTrace("decision", new { actionName = action.Name, kind = action.Kind, strength = action.Strength, reason, mask = maskStatus }, ct);
 
         var outcome = _actuator.Apply(action, ref _homeo, ref _affect);
@@ -926,7 +927,7 @@ public sealed class LifeLoop
         var executiveAfter = new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo,
             LifeMath.Clamp01(_instincts.Compute(_homeo, _world, config.Drives).Agency - _agencyOffset),
             _world.Novelty, SocialContactResponder.HasPending(_world.Events));
-        var goalOutcome = _executive.Observe(action.Name, executiveBefore, executiveAfter, invalidAction, socialSignalsHandled);
+        var goalOutcome = _executive.Observe(action.Name, executiveBefore, executiveAfter, invalidAction, socialSignalsHandled,action.Strength);
         _cognition.Observe(action,cognitiveBefore,cognitiveBefore with { Body=_homeo,
             Novelty=_world.Novelty,Agency=executiveAfter.AgencyNeed,SocialPending=executiveAfter.SocialSignalPending },
             invalidAction,socialSignalsHandled,_executive.Snapshot());

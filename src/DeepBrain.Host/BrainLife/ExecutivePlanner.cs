@@ -31,6 +31,7 @@ public sealed class ExecutivePlanner
     private double _appliedBias;
     private string _biasStatus = "idle";
     private string _scenarioResumeStatus = "not_attempted";
+    private IReadOnlyList<StrategyEffectHint> _effectHints = Array.Empty<StrategyEffectHint>();
     public ExecutivePlanner(Action<string>? log = null) => _log = log ?? (_ => { });
     public bool Enabled { get { lock (_gate) return _config.Enable; } }
     public long ContextRevision { get { lock (_gate) return _state.Revision; } }
@@ -79,6 +80,8 @@ public sealed class ExecutivePlanner
         {
             var config = settings.Normalize();
             var path = System.IO.Path.GetFullPath(config.Path);
+            if (_config.EnableStrategyLearning && !config.EnableStrategyLearning && _state.Active is { } disabling)
+            { FinishAttempt(disabling,"interrupted","learning_disabled"); disabling.TriedMethods.Clear(); }
             if (_path != path || (_config.Enable && !config.Enable))
             {
                 Flush();
@@ -86,6 +89,7 @@ public sealed class ExecutivePlanner
             }
             if (config.Enable && _path != path)
             {
+                if (File.Exists(path) && new FileInfo(path).Length>4_000_000) throw new InvalidDataException("Planning state too large");
                 // Parse before replacing state; an unreadable file must never be overwritten.
                 var loaded = File.Exists(path)
                     ? JsonSerializer.Deserialize<PlannerState>(File.ReadAllText(path), Json)
@@ -101,12 +105,14 @@ public sealed class ExecutivePlanner
         }
     }
 
-    public PlanDto? Begin(IReadOnlyList<GoalDto> goals, ExecutiveObservation observation)
+    public PlanDto? Begin(IReadOnlyList<GoalDto> goals, ExecutiveObservation observation,
+        IReadOnlyList<StrategyEffectHint>? effectHints = null)
     {
         lock (_gate)
         {
             _appliedBias = 0; _biasStatus = "idle";
             if (!_config.Enable) return null;
+            _effectHints = effectHints ?? Array.Empty<StrategyEffectHint>();
             Validate(observation);
             var contextChanged = RememberScenario(observation.Scenario, observation.EpisodeId, flush: false);
             if (_state.Active is { } previous &&
@@ -124,7 +130,8 @@ public sealed class ExecutivePlanner
             if (_resumePending)
             {
                 _resumePending = false; _revalidated = true; _state.Revision++;
-                if (_state.Active is { } resumed) resumed.VerifiedTicks = 0;
+                if (_state.Active is { } resumed)
+                { resumed.VerifiedTicks = 0; if(resumed.Attempt is { } a) a.LastEnergy=null; }
             }
             var urgent = observation.Body.Safety < 0.35 || observation.Body.Pain > 0.65;
             if (urgent && _state.Active is { GoalId: not "regulate" })
@@ -161,6 +168,10 @@ public sealed class ExecutivePlanner
                 _state.Revision++;
                 _log("ЦЕЛЬ ПРИНЯТА: " + Title(top.Key));
             }
+            if (_config.EnableStrategyLearning && _state.Active is { Attempt: null } learning)
+                SelectMethod(learning, observation);
+            if (_config.EnableStrategyLearning && _state.Active?.Attempt is { } currentAttempt)
+                StrategyLearning.UpdateObservation(currentAttempt,observation);
             if (contextChanged) Flush(); else MaybeFlush();
             return Plan();
         }
@@ -175,14 +186,18 @@ public sealed class ExecutivePlanner
             if (!_config.Enable || plan is null || plan.Status == "paused") { _biasStatus = "idle"; return; }
             var preferred = Preferred(plan);
             if (!legalScores.TryGetValue(preferred, out var score) || !double.IsFinite(score))
-            { _biasStatus = "unavailable"; return; }
+            {
+                _biasStatus = "unavailable";
+                if (_config.EnableStrategyLearning && plan.Attempt is { } blocked) { blocked.Unavailable++; _dirty = true; }
+                return;
+            }
             _appliedBias = _config.MaxActionBias; _biasStatus = "applied";
             legalScores[preferred] = score + _appliedBias;
         }
     }
 
     public GoalOutcomeDto? Observe(string action, ExecutiveObservation before, ExecutiveObservation after,
-        bool invalidAction, int socialSignalsHandled)
+        bool invalidAction, int socialSignalsHandled, double actionStrength = 1)
     {
         lock (_gate)
         {
@@ -191,6 +206,8 @@ public sealed class ExecutivePlanner
             if (!string.Equals(before.Scenario, plan.Scenario, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(after.Scenario, plan.Scenario, StringComparison.OrdinalIgnoreCase) || after.EpisodeId != plan.EpisodeId)
                 return Finish("interrupted", "context_changed", "Условия выполнения изменились");
+            if (_config.EnableStrategyLearning && plan.Attempt is { } attempt)
+                StrategyLearning.Observe(attempt, plan.GoalId, action, before, after, invalidAction, socialSignalsHandled, plan.FocusTarget,actionStrength);
             if (!invalidAction)
             {
                 if (action == "explore_signal" && before.Novelty - after.Novelty > 0.00001) plan.Explorations++;
@@ -221,6 +238,11 @@ public sealed class ExecutivePlanner
             {
                 if (plan.Replans >= _config.MaxReplans)
                     return Finish("failed", "no_progress", plan.Evidence);
+                if (_config.EnableStrategyLearning && plan.Attempt is { } stalled)
+                {
+                    FinishAttempt(plan, "stalled", "no_progress");
+                    SelectMethod(plan, after);
+                }
                 plan.Replans++; plan.LastProgressClock = _state.AwakeClock; plan.Stage = "replan";
                 _state.Revision++;
                 _log($"ПЛАН ПЕРЕСМОТРЕН: {Title(plan.GoalId)}, попытка {plan.Replans + 1}");
@@ -230,12 +252,28 @@ public sealed class ExecutivePlanner
         }
     }
 
+    public ActionDto AdjustAction(ActionDto action, bool invalidAction)
+    {
+        lock (_gate)
+        {
+            if (invalidAction || !_config.Enable || !_config.EnableStrategyLearning ||
+                _state.Active is not { Status: "active", Attempt: { } attempt } ||
+                action.Name != StrategyLearning.Action(attempt) || !double.IsFinite(action.Strength)) return action;
+            var minimum = StrategyLearning.MinimumStrength(attempt);
+            return minimum > 0 ? action with { Strength = Math.Clamp(Math.Max(minimum,action.Strength),0,1) } : action;
+        }
+    }
+
     public ExecutiveStateDto Snapshot()
     {
         lock (_gate) return new(_config.Enable, _state.AwakeClock, Plan(), _state.Succeeded, _state.Failed,
             _state.Interrupted, _state.Outcomes.TakeLast(_config.MaxOutcomes).Reverse().ToArray(), _lastError,
             _lastSavedAt, _state.Active is { } p ? Preferred(p) : null, _appliedBias, _biasStatus, _revalidated)
-        { SavedScenario = SavedScenario?.Name, ScenarioResumeStatus = _scenarioResumeStatus };
+        { SavedScenario = SavedScenario?.Name, ScenarioResumeStatus = _scenarioResumeStatus,
+            StrategyLearning = new(_config.Enable && _config.EnableStrategyLearning, _state.Learning?.Completed ?? 0,
+                _state.Learning?.Learned ?? 0, _state.Learning?.Models.Count ?? 0, _state.Active?.Attempt?.Choice,
+                _state.Learning?.History.AsEnumerable().Reverse().ToArray() ?? Array.Empty<StrategyAttemptDto>())
+            { ActiveAttemptId = _state.Active?.Attempt?.Id, Phase = _state.Active?.Attempt?.Phase } };
     }
 
     public void Flush()
@@ -266,6 +304,7 @@ public sealed class ExecutivePlanner
     private GoalOutcomeDto Finish(string status, string reason, string evidence)
     {
         var p = _state.Active!;
+        if (_config.EnableStrategyLearning) FinishAttempt(p, status, reason);
         if (status == "succeeded") p.Progress = 1;
         var result = new GoalOutcomeDto(p.Id, p.GoalId, Title(p.GoalId), status, reason, evidence,
             p.AgeTicks, p.Replans, p.Progress, DateTimeOffset.UtcNow);
@@ -286,6 +325,8 @@ public sealed class ExecutivePlanner
         var strategy = p.GoalId == "restore_energy" ? "rest" : p.GoalId;
         if (p.Stage == "prepare" && p.GoalId is not ("restore_energy" or "regulate")) strategy = "focus";
         if (p.Replans % 2 == 1) strategy = p.GoalId switch { "restore_energy" => "regulate", "regulate" => "rest", _ => "focus" };
+        if (_config.EnableStrategyLearning && p.Attempt is { } attempt &&
+            !(p.Stage == "prepare" && p.GoalId is not ("restore_energy" or "regulate"))) strategy = StrategyLearning.CandidateStrategy(attempt);
         return new(strategy, Math.Max(0, _config.MaxPlanTicks - p.AgeTicks), p.GoalId, "measured_goal")
         {
             PlanId = p.Id, Status = p.Status, Stage = p.Stage, GoalTitle = Title(p.GoalId),
@@ -293,14 +334,30 @@ public sealed class ExecutivePlanner
             Replans = p.Replans, Evidence = p.Evidence, PreferredAction = Preferred(p)
         };
     }
-    private static string Preferred(Intention p) => p.Stage == "prepare" && p.GoalId is not ("restore_energy" or "regulate")
-        ? "focus_widen" : (p.GoalId, p.Replans % 2) switch
+    private string Preferred(Intention p) => p.Stage == "prepare" && p.GoalId is not ("restore_energy" or "regulate")
+        ? "focus_widen" : _config.EnableStrategyLearning && p.Attempt is { } attempt
+        ? StrategyLearning.Action(attempt) : (p.GoalId, p.Replans % 2) switch
     {
         ("regulate", 0) => "breathe_slow", ("regulate", _) => "rest_short",
         ("restore_energy", 0) => "rest_short", ("restore_energy", _) => "breathe_slow",
         ("explore", 0) => "explore_signal", ("connect", 0) => "emit_message", ("focus", 0) => "focus_narrow",
         _ => "focus_widen"
     };
+    private void SelectMethod(Intention plan, ExecutiveObservation observation)
+    {
+        _state.Learning ??= new();
+        plan.Attempt = StrategyLearning.Choose(_state.Learning, plan.Id, plan.GoalId, observation,
+            _state.AwakeClock, ++plan.AttemptSequence, plan.TriedMethods.ToHashSet(), _effectHints);
+        if(!plan.TriedMethods.Contains(plan.Attempt.Choice.Id)) plan.TriedMethods.Add(plan.Attempt.Choice.Id);
+        _dirty = true;
+    }
+    private void FinishAttempt(Intention plan, string outcome, string reason)
+    {
+        if (plan.Attempt is not { } attempt) return;
+        _state.Learning ??= new();
+        StrategyLearning.Finish(_state.Learning, attempt, plan.Id, plan.GoalId, plan.Scenario, outcome, reason, _state.AwakeClock);
+        plan.Attempt = null; _dirty = true;
+    }
     private static bool Needed(string goal, ExecutiveObservation o) => goal switch
     {
         "regulate" or "restore_energy" => Distance(goal, o) > 1e-9,
@@ -345,6 +402,19 @@ public sealed class ExecutivePlanner
     }
     private static void Validate(PlannerState s)
     {
+        if (s.Learning is not null) StrategyLearning.Validate(s.Learning, s.AwakeClock);
+        if (s.Active is { } linked && (linked.TriedMethods is null || linked.TriedMethods.Count>6 ||
+            linked.AttemptSequence<0 || linked.AttemptSequence>1_000_000 ||
+            linked.TriedMethods.Any(x=>!StrategyLearning.ValidMethod(linked.GoalId,x))))
+            throw new InvalidDataException("Invalid strategy sequence");
+        if (s.Active is { Attempt: { } attempt } active)
+        {
+            if (s.Learning is null || active.TriedMethods is null || active.TriedMethods.Count>6 ||
+                !active.TriedMethods.Contains(attempt.Choice?.Id ?? "") || active.TriedMethods.Any(x=>!StrategyLearning.ValidMethod(active.GoalId,x)))
+                throw new InvalidDataException("Invalid strategy attempt linkage");
+            StrategyLearning.ValidateAttempt(attempt,active.GoalId,s.AwakeClock);
+            if(attempt.Id!=active.Id+":"+active.AttemptSequence) throw new InvalidDataException("Invalid strategy attempt identity");
+        }
         if (s.ScenarioContext is { } context && (string.IsNullOrWhiteSpace(context.Name) || context.EpisodeId < 0))
             throw new InvalidDataException("Invalid persisted scenario context");
         if (s.SchemaVersion != 1 || s.AwakeClock < 0 || s.Revision < 0 || s.Succeeded < 0 || s.Failed < 0 ||
@@ -367,6 +437,7 @@ public sealed class ExecutivePlanner
     {
         // Optional additive metadata: existing schema-1 files remain readable.
         public PlanningScenarioContext? ScenarioContext { get; set; }
+        public StrategyLearningState? Learning { get; set; }
         [JsonRequired] public int SchemaVersion { get; set; } = 1;
         [JsonRequired] public long AwakeClock { get; set; }
         [JsonRequired] public long Revision { get; set; }
@@ -379,6 +450,9 @@ public sealed class ExecutivePlanner
     }
     private sealed class Intention
     {
+        public StrategyAttempt? Attempt { get; set; }
+        public List<string> TriedMethods { get; set; } = new();
+        public int AttemptSequence { get; set; }
         [JsonRequired] public string Id { get; set; } = "";
         [JsonRequired] public string GoalId { get; set; } = "";
         [JsonRequired] public string Scenario { get; set; } = "";

@@ -233,6 +233,11 @@ public sealed class OllamaCortexClient : ILlmCortexClient
             data += cognitiveData; userPrompt += cognitiveData;
             systemPrompt += " Эмоции — моделируемые интенсивности, а confidence ожидания — оценка по наблюдениям, не гарантия. Учитывай их без утверждений о человеческом сознании.";
         }
+        if (!string.IsNullOrWhiteSpace(frame.StrategyContext))
+        {
+            var strategyData = $"\nstrategy|{CompactLine(frame.StrategyContext, config.MaxContextChars)}";
+            data += strategyData; userPrompt += strategyData;
+        }
         var payload = new
         {
             model = config.Model,

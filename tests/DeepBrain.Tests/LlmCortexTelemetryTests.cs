@@ -119,7 +119,8 @@ public sealed class LlmCortexTelemetryTests
             GoalCriterion = "Два исследования с измеримым эффектом",
             EmotionContext = "curiosity=0.70, calm=0.50",
             WorkingContext = "Замечен новый сигнал",
-            ExpectationContext = "explore_signal; samples=12; confidence=0.50"
+            ExpectationContext = "explore_signal; samples=12; confidence=0.50",
+            StrategyContext = "explore; why=learned_results; attempts=8"
         };
 
         var response = await client.ObserveAsync(frame, config, CancellationToken.None);
@@ -134,7 +135,7 @@ public sealed class LlmCortexTelemetryTests
         Assert.NotNull(handler.RequestBody);
         Assert.Equal(Encoding.UTF8.GetByteCount(handler.RequestBody), metrics.RequestBytes);
         Assert.True(metrics.PromptCharacters > metrics.DataCharacters);
-        Assert.True(metrics.RequestBytes < 6_000, $"request bytes={metrics.RequestBytes}");
+        Assert.True(metrics.RequestBytes < 6_200, $"request bytes={metrics.RequestBytes}");
 
         using var requestDocument = JsonDocument.Parse(handler.RequestBody);
         var request = requestDocument.RootElement;
@@ -160,6 +161,7 @@ public sealed class LlmCortexTelemetryTests
         Assert.Contains("\nemotions|curiosity=0.70, calm=0.50", data);
         Assert.Contains("\nworking_memory|Замечен новый сигнал", data);
         Assert.Contains("\nexpectation|explore_signal", data);
+        Assert.Contains("\nstrategy|explore; why=learned_results", data);
         Assert.Contains("\ngoal|id=explore|stage=verify|progress=0.5|criterion=Два исследования с измеримым эффектом", data);
         Assert.Contains("Не объявляй её выполненной", messages[0].GetProperty("content").GetString());
         Assert.DoesNotContain("contractVersion", data);
