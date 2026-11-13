@@ -35,7 +35,8 @@ public sealed record BrainConfig(
     HabitConfig? Habits = null,
     LlmConfig? Llm = null,
     ExternalApiConfig? ExternalApi = null,
-    PlanningConfig? Planning = null)
+    PlanningConfig? Planning = null,
+    CognitiveDynamicsConfig? CognitiveDynamics = null)
 {
     public static BrainConfig Default => new(
         new WorldConfig(

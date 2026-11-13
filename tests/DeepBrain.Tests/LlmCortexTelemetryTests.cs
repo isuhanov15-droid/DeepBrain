@@ -116,7 +116,10 @@ public sealed class LlmCortexTelemetryTests
             ActiveGoal = "explore",
             PlanStage = "verify",
             GoalProgress = 0.5,
-            GoalCriterion = "Два исследования с измеримым эффектом"
+            GoalCriterion = "Два исследования с измеримым эффектом",
+            EmotionContext = "curiosity=0.70, calm=0.50",
+            WorkingContext = "Замечен новый сигнал",
+            ExpectationContext = "explore_signal; samples=12; confidence=0.50"
         };
 
         var response = await client.ObserveAsync(frame, config, CancellationToken.None);
@@ -153,7 +156,10 @@ public sealed class LlmCortexTelemetryTests
         Assert.Equal(
             (messages[0].GetProperty("content").GetString() ?? "").Length + userContent.Length,
             metrics.PromptCharacters);
-        Assert.True(data.Length < 1100, $"data chars={data.Length}");
+        Assert.True(data.Length < 1300, $"data chars={data.Length}");
+        Assert.Contains("\nemotions|curiosity=0.70, calm=0.50", data);
+        Assert.Contains("\nworking_memory|Замечен новый сигнал", data);
+        Assert.Contains("\nexpectation|explore_signal", data);
         Assert.Contains("\ngoal|id=explore|stage=verify|progress=0.5|criterion=Два исследования с измеримым эффектом", data);
         Assert.Contains("Не объявляй её выполненной", messages[0].GetProperty("content").GetString());
         Assert.DoesNotContain("contractVersion", data);

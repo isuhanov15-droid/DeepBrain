@@ -46,4 +46,6 @@ public sealed record LifeStateDto(
     public string CortexContextId { get; init; } = "";
     [JsonPropertyName("executive")]
     public ExecutiveStateDto? Executive { get; init; }
+    [JsonPropertyName("cognition")]
+    public CognitiveDynamicsDto? Cognition { get; init; }
 }

@@ -55,6 +55,9 @@ public sealed record CognitiveFrame(
     public string PlanStage { get; init; } = "";
     public string GoalCriterion { get; init; } = "";
     public double GoalProgress { get; init; }
+    public string EmotionContext { get; init; } = "";
+    public string WorkingContext { get; init; } = "";
+    public string ExpectationContext { get; init; } = "";
 }
 
 public sealed record CognitiveInsight(

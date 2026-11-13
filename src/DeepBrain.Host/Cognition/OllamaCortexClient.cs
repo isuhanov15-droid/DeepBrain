@@ -225,6 +225,14 @@ public sealed class OllamaCortexClient : ILlmCortexClient
             systemPrompt += " Учитывай текущую цель goal. Не объявляй её выполненной без подтверждённого результата.";
         }
 
+        if (!string.IsNullOrWhiteSpace(frame.EmotionContext))
+        {
+            var cognitiveData = $"\nemotions|{CompactLine(frame.EmotionContext, config.MaxContextChars)}" +
+                $"\nworking_memory|{CompactLine(frame.WorkingContext, config.MaxContextChars)}" +
+                $"\nexpectation|{CompactLine(frame.ExpectationContext, config.MaxContextChars)}";
+            data += cognitiveData; userPrompt += cognitiveData;
+            systemPrompt += " Эмоции — моделируемые интенсивности, а confidence ожидания — оценка по наблюдениям, не гарантия. Учитывай их без утверждений о человеческом сознании.";
+        }
         var payload = new
         {
             model = config.Model,

@@ -410,6 +410,11 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
             PlanStage = state.Executive?.Enabled == true ? state.ActivePlan?.Stage ?? "" : "",
             GoalCriterion = state.Executive?.Enabled == true ? state.ActivePlan?.SuccessCriterion ?? "" : "",
             GoalProgress = FiniteOrZero(state.ActivePlan?.Progress ?? 0),
+            EmotionContext = state.Cognition?.Enabled == true ? string.Join(", ",state.Cognition.Emotions
+                .OrderByDescending(e=>e.Intensity).Take(3).Select(e=>$"{e.Id}={e.Intensity.ToString("0.00",System.Globalization.CultureInfo.InvariantCulture)}")) : "",
+            WorkingContext = state.Cognition?.Enabled == true ? Abbreviate(string.Join("; ",state.Cognition.WorkingMemory.Take(3).Select(m=>m.Text)),config.MaxContextChars) : "",
+            ExpectationContext = state.Cognition?.Enabled == true && state.Cognition.Expectation is { } expected
+                ? $"{expected.Action}; samples={expected.Samples}; status={expected.Status}; confidence={expected.Confidence.ToString("0.00",System.Globalization.CultureInfo.InvariantCulture)}" : "",
             Energy = FiniteOrZero(state.Homeostasis.Energy),
             Fatigue = FiniteOrZero(state.Homeostasis.Fatigue),
             ExplorationNeed = FiniteOrZero(state.Instincts.Exploration),
