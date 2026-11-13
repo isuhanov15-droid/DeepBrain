@@ -238,6 +238,11 @@ public sealed class OllamaCortexClient : ILlmCortexClient
             var strategyData = $"\nstrategy|{CompactLine(frame.StrategyContext, config.MaxContextChars)}";
             data += strategyData; userPrompt += strategyData;
         }
+        if (!string.IsNullOrWhiteSpace(frame.IntentionContext))
+        {
+            var intentionData = $"\nintentions|{CompactLine(frame.IntentionContext, config.MaxContextChars)}";
+            data += intentionData; userPrompt += intentionData;
+        }
         var payload = new
         {
             model = config.Model,

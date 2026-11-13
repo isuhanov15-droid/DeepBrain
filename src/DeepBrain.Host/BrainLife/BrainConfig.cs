@@ -507,6 +507,9 @@ public sealed record PlanningConfig
 {
     public bool Enable { get; init; }
     public bool EnableStrategyLearning { get; init; }
+    public bool EnableIntentions { get; init; }
+    public int MaxDeferredIntentions { get; init; } = 3;
+    public int MaxDeferredTicks { get; init; } = 1800;
     public string Path { get; init; } = "memory/planning.json";
     public int MaxPlanTicks { get; init; } = 180;
     public int CommitmentTicks { get; init; } = 20;
@@ -522,6 +525,8 @@ public sealed record PlanningConfig
     public PlanningConfig Normalize() => this with
     {
         Path = string.IsNullOrWhiteSpace(Path) ? "memory/planning.json" : Path.Trim(),
+        MaxDeferredIntentions = Math.Clamp(MaxDeferredIntentions, 1, 4),
+        MaxDeferredTicks = Math.Clamp(MaxDeferredTicks, 20, 36000),
         MaxPlanTicks = Math.Clamp(MaxPlanTicks, 20, 1800),
         CommitmentTicks = Math.Clamp(CommitmentTicks, 1, Math.Clamp(MaxPlanTicks, 20, 1800)),
         StallTicks = Math.Clamp(StallTicks, 5, 600),

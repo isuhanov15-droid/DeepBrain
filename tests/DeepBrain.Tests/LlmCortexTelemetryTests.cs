@@ -120,7 +120,8 @@ public sealed class LlmCortexTelemetryTests
             EmotionContext = "curiosity=0.70, calm=0.50",
             WorkingContext = "Замечен новый сигнал",
             ExpectationContext = "explore_signal; samples=12; confidence=0.50",
-            StrategyContext = "explore; why=learned_results; attempts=8"
+            StrategyContext = "explore; why=learned_results; attempts=8",
+            IntentionContext = "deferred=focus; current=explore; return=if_still_relevant_and_safe"
         };
 
         var response = await client.ObserveAsync(frame, config, CancellationToken.None);
@@ -162,6 +163,7 @@ public sealed class LlmCortexTelemetryTests
         Assert.Contains("\nworking_memory|Замечен новый сигнал", data);
         Assert.Contains("\nexpectation|explore_signal", data);
         Assert.Contains("\nstrategy|explore; why=learned_results", data);
+        Assert.Contains("\nintentions|deferred=focus; current=explore", data);
         Assert.Contains("\ngoal|id=explore|stage=verify|progress=0.5|criterion=Два исследования с измеримым эффектом", data);
         Assert.Contains("Не объявляй её выполненной", messages[0].GetProperty("content").GetString());
         Assert.DoesNotContain("contractVersion", data);

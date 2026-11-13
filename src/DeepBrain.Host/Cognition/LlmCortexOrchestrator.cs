@@ -417,6 +417,9 @@ public sealed class LlmCortexOrchestrator : IAsyncDisposable
                 ? $"{expected.Action}; samples={expected.Samples}; status={expected.Status}; confidence={expected.Confidence.ToString("0.00",System.Globalization.CultureInfo.InvariantCulture)}" : "",
             StrategyContext = state.Executive?.StrategyLearning is { Enabled: true, Choice: { } choice }
                 ? Abbreviate($"{choice.Id}; why={choice.Reason}; attempts={choice.Samples}; action={state.Executive.PreferredAction}",config.MaxContextChars) : "",
+            IntentionContext = state.Executive?.Intentions is { Enabled: true, Deferred.Count: > 0 } intentions
+                ? Abbreviate("deferred=" + string.Join(">", intentions.Deferred.Select(d => d.GoalId)) +
+                    "; current=" + (state.ActivePlan?.GoalId ?? "none") + "; return=if_still_relevant_and_safe", config.MaxContextChars) : "",
             Energy = FiniteOrZero(state.Homeostasis.Energy),
             Fatigue = FiniteOrZero(state.Homeostasis.Fatigue),
             ExplorationNeed = FiniteOrZero(state.Instincts.Exploration),
