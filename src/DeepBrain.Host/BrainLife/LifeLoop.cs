@@ -184,6 +184,7 @@ public sealed partial class LifeLoop
         _curriculum = new CurriculumManager(cfg.Ml.Seed);
         _policyEvaluator = new PolicyEvaluator(_scenarioScorer);
         _ml = mlAdvisor ?? MlPolicyAdvisorFactory.Create(MlCoreAvailability.IsAvailable, cfg.Ml, _log);
+        _foresight.Configure(cfg.Foresight);
         InitializeContinuity(cfg, runtimeCheckpoint);
     }
 
@@ -571,6 +572,7 @@ public sealed partial class LifeLoop
         var beforeAffect = _affect;
         var (config, version) = _configLoader.GetCurrent();
         _configVersion = version;
+        _foresight.Configure(config.Foresight);
         var curriculumCfg = config.Curriculum ?? BrainConfig.Default.Curriculum;
         var evalCfg = config.Evaluation ?? BrainConfig.Default.Evaluation;
         var memoryCfg = config.Memory ?? MemoryConfig.Default;
@@ -671,6 +673,7 @@ public sealed partial class LifeLoop
 
         if (_sleep.IsSleeping)
         {
+            _foresight.Suspend("sleeping");
             var pausedPlan = _executive.Begin(Array.Empty<DeepBrain.Shared.BrainDtos.V3.GoalDto>(),
                 new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo, 0,
                     _world.Novelty, SocialContactResponder.HasPending(_world.Events), true));
@@ -752,7 +755,7 @@ public sealed partial class LifeLoop
                 new CurriculumStateDto(_curriculumMode, _scenarioIndex),
                 new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
                 new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
-            ) { Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
+            ) { Foresight = _foresight.Enabled ? _foresight.Snapshot() : null, Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
             EmitTrace("tick", $"тик={_tick} эпизод={_episode.EpisodeId} действие=сон награда=0.000 петля=нет ε=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
@@ -895,6 +898,7 @@ public sealed partial class LifeLoop
             }, ct);
         }
 
+        var forecastActions = candidates.Select(c => _executive.AdjustAction(c.Action, false)).DistinctBy(a => a.Name).ToArray();
         var actionMask = _masker.BuildMask(
             _homeo,
             _affect,
@@ -934,6 +938,12 @@ public sealed partial class LifeLoop
             CortexContextId, false, _homeo.Safety, _homeo.Pain, heuristicScores);
         _executive.ApplyBias(heuristicScores);
         _cognition.ApplyBias(heuristicScores,activePlan?.GoalId);
+        var forecastBefore = new ForecastObservation(_scenarioName, _episode.EpisodeId, activePlan?.PlanId, activePlan?.GoalId,
+            _homeo, _affect, _world.Novelty, cognitiveBefore.Agency, hasPendingSocialSignal, _tick);
+        _foresight.Plan(forecastBefore, forecastActions, heuristicScores, _cooldowns, config.Actions, emitCooldown,
+            _loop.IsLoopDetected, episodeConfig.PanicSafetyMin, _cognition.LearnedEffects(_scenarioName),
+            Math.Min(Math.Max(1, _episode.EpisodeLengthTicks - _episode.EpisodeTick),
+                circ.Phase is "evening" or "night" && circ.SleepPressure > .55 ? 1 : 3));
 
         var stateVec = mlConfigEffective.Enable
             ? _ml.Encode(new StateVectorInput(
@@ -990,6 +1000,8 @@ public sealed partial class LifeLoop
         var executiveAfter = new ExecutiveObservation(_scenarioName, _episode.EpisodeId, _homeo,
             LifeMath.Clamp01(_instincts.Compute(_homeo, _world, config.Drives).Agency - _agencyOffset),
             _world.Novelty, SocialContactResponder.HasPending(_world.Events));
+        _foresight.Observe(action, forecastBefore, forecastBefore with { Body = _homeo, Affect = _affect,
+            Novelty = _world.Novelty, Agency = executiveAfter.AgencyNeed, SocialPending = executiveAfter.SocialSignalPending }, invalidAction);
         var goalOutcome = _executive.Observe(action.Name, executiveBefore, executiveAfter, invalidAction, socialSignalsHandled,action.Strength);
         _cognition.Observe(action,cognitiveBefore,cognitiveBefore with { Body=_homeo,
             Novelty=_world.Novelty,Agency=executiveAfter.AgencyNeed,SocialPending=executiveAfter.SocialSignalPending },
@@ -1190,7 +1202,7 @@ public sealed partial class LifeLoop
             new CurriculumStateDto(_curriculumMode, _scenarioIndex),
             new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
             loopInfo
-        ) { Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
+        ) { Foresight = _foresight.Enabled ? _foresight.Snapshot() : null, Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
         EmitTrace("tick",
             $"тик={_tick} эпизод={_episode.EpisodeId} " +
             $"действие={RussianDisplay.Token(action.Name)} награда={rewardDto.Total:0.000} " +
@@ -1545,6 +1557,7 @@ public sealed partial class LifeLoop
 
     private void ResetEpisode(string reason, EpisodeConfig episodeConfig)
     {
+        _foresight.Suspend("episode_changed");
         if (reason == "panic")
         {
             var before = _homeo;

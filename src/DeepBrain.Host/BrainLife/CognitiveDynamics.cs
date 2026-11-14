@@ -208,6 +208,19 @@ public sealed partial class CognitiveDynamics
         }
     }
 
+    public IReadOnlyList<LearnedActionEffect> LearnedEffects(string scenario)
+    {
+        lock (_gate)
+        {
+            if (!_config.Enable) return Array.Empty<LearnedActionEffect>();
+            return ActionCatalog.Actions.Where(a => _state.Models.ContainsKey(Key(scenario,a))).Select(a =>
+            {
+                var m = _state.Models[Key(scenario,a)];
+                return new LearnedActionEffect(a, (double[])m.Effect.Clone(), m.Samples, Confidence(m));
+            }).ToArray();
+        }
+    }
+
     private void IntegrateOutcomes(IReadOnlyList<GoalOutcomeDto> outcomes)
     {
         if (_seedOutcomes) { foreach (var o in outcomes) _seenOutcomes.Add(o.PlanId); _seedOutcomes = false; return; }

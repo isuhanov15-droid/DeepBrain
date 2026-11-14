@@ -49,11 +49,14 @@ public sealed class RuntimeContinuityTests : IDisposable
     private static void Restore(Dictionary<string, byte[]> files) { foreach (var p in files) System.IO.File.WriteAllBytes(p.Key, p.Value); }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void FullBoundaryAndNextActionsSurviveAwakeAndSleepingRestart(bool sleeping)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void FullBoundaryAndNextActionsSurviveAwakeAndSleepingRestart(bool sleeping, bool foresight)
     {
-        var first = NewLoop(); Tick(first.Loop, 130);
+        var config = Config with { Foresight = foresight ? new(true) : null };
+        var first = NewLoop(config); Tick(first.Loop, 130);
         if (sleeping)
         {
             var clock = Get(first.Loop, "_clock");
@@ -70,7 +73,7 @@ public sealed class RuntimeContinuityTests : IDisposable
         for (var i = 0; i < 400; i++) { Tick(first.Loop); expected.Add(first.States[^1]); }
         if (sleeping) Assert.Contains(expected, x => x.Circadian!.IsSleeping == false);
         Restore(backup);
-        var restored = NewLoop();
+        var restored = NewLoop(config);
         Assert.Equal(expectedBoundary, RuntimeState(restored.Loop));
         for (var i = 0; i < expected.Count; i++)
         {
@@ -89,6 +92,41 @@ public sealed class RuntimeContinuityTests : IDisposable
         }
         var proof = JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json.restore.json")))!;
         Assert.Equal(proof["expectedStateHash"]!.ToString(), proof["restoredStateHash"]!.ToString());
+    }
+
+    [Fact]
+    public void Version19CheckpointMigratesWithoutChangingExistingRuntimeOrExperience()
+    {
+        var first = NewLoop(); Tick(first.Loop, 85); first.Loop.FlushPersistentState();
+        var old = RuntimeState(first.Loop);
+        var json = JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json")))!;
+        json["schemaVersion"] = 1; // v1.9's same component/config contract, without foresight.
+        System.IO.File.WriteAllText(FilePath("runtime.json"), json.ToJsonString());
+        var backup = Backup();
+        var config = Config with { Foresight = new(true) };
+        var restored = NewLoop(config);
+        var actual = JsonNode.Parse(RuntimeState(restored.Loop))!.AsObject();
+        Assert.True(actual.Remove("foresight"));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(old),actual));
+        foreach(var file in backup.Where(p => !p.Key.EndsWith("config.json")))
+            Assert.Equal(file.Value,System.IO.File.ReadAllBytes(file.Key));
+        Tick(restored.Loop, 5); restored.Loop.FlushPersistentState();
+        var upgraded = JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json")))!;
+        Assert.Equal(2, upgraded["schemaVersion"]!.GetValue<int>());
+        Assert.NotNull(upgraded["components"]!["foresight"]);
+        var again = NewLoop(config);
+        Assert.Equal(RuntimeState(restored.Loop),RuntimeState(again.Loop));
+    }
+
+    [Fact]
+    public void LegacyMigrationDoesNotPermitUnrelatedConfigurationChanges()
+    {
+        var run=NewLoop();Tick(run.Loop,10);run.Loop.FlushPersistentState();
+        var json=JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json")))!;json["schemaVersion"]=1;
+        System.IO.File.WriteAllText(FilePath("runtime.json"),json.ToJsonString());
+        var backup=Backup();
+        Assert.Throws<InvalidDataException>(()=>NewLoop(Config with { Foresight=new(true), TickRate=10 }));
+        foreach(var file in backup.Where(p=>!p.Key.EndsWith("config.json")))Assert.Equal(file.Value,System.IO.File.ReadAllBytes(file.Key));
     }
 
     [Fact]

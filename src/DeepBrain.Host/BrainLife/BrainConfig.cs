@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace DeepBrain.Host.BrainLife;
 
@@ -37,7 +38,8 @@ public sealed record BrainConfig(
     ExternalApiConfig? ExternalApi = null,
     PlanningConfig? Planning = null,
     CognitiveDynamicsConfig? CognitiveDynamics = null,
-    ContinuityConfig? Continuity = null)
+    ContinuityConfig? Continuity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ForesightConfig? Foresight = null)
 {
     public static BrainConfig Default => new(
         new WorldConfig(

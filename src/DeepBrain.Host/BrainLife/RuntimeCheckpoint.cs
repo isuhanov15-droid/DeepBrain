@@ -10,7 +10,7 @@ internal sealed class RuntimeCheckpoint
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { WriteIndented = false, MaxDepth = 64 };
-    [JsonRequired] public int SchemaVersion { get; set; } = 1;
+    [JsonRequired] public int SchemaVersion { get; set; } = 2;
     [JsonRequired] public string Id { get; set; } = "";
     [JsonRequired] public DateTimeOffset SavedAt { get; set; }
     [JsonRequired] public string ConfigHash { get; set; } = "";
@@ -69,9 +69,15 @@ internal sealed class RuntimeCheckpoint
             throw new InvalidDataException("Runtime checkpoint exceeds 64 MB");
         using var document = JsonDocument.Parse(File.ReadAllBytes(settings.Path));
         var snapshot = Deserialize<RuntimeCheckpoint>(document.RootElement);
-        if (snapshot.SchemaVersion != 1 || !Guid.TryParseExact(snapshot.Id, "N", out _) ||
+        // The only automatic configuration migration is v1.9 -> v1.10's new
+        // foresight section. Every existing setting, file and runtime component
+        // still has to match the old boundary exactly.
+        var configMatches = snapshot.ConfigHash == ConfigurationHash(config) ||
+            snapshot.SchemaVersion == 1 && snapshot.ConfigHash == ConfigurationHash(config with { Foresight = null });
+        if (snapshot.SchemaVersion is not (1 or 2) || !Guid.TryParseExact(snapshot.Id, "N", out _) ||
             snapshot.Components is null || snapshot.Files is null ||
-            snapshot.ConfigHash != ConfigurationHash(config) || snapshot.StateHash != HashState(snapshot.Components))
+            snapshot.SchemaVersion == 1 && snapshot.Components.ContainsKey("foresight") ||
+            !configMatches || snapshot.StateHash != HashState(snapshot.Components))
             throw new InvalidDataException("Runtime checkpoint is incompatible or damaged. Existing experience has not been changed.");
         var current = CaptureFiles(config);
         if (!current.Keys.Order(StringComparer.Ordinal).SequenceEqual(snapshot.Files.Keys.Order(StringComparer.Ordinal)) ||
