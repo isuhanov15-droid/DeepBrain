@@ -1,3 +1,10 @@
+# DeepBrain 1.12 / Web 0.17 — source publication
+
+- Publish the existing 1.4→1.12 implementation history: goal planning, working memory, emotions, strategy learning, deferred intentions, complete state restoration, foresight, conversation experience and Qwen semantic appraisal.
+- Include the complete Web interface, local 9B/4B dialogue routing, persistent conversation/facts, Station voice delivery and mood display, plus tests and operating scripts.
+- Configure Yandex application credentials through environment variables in this source distribution. Previously authorized Station tokens remain external data. No live deployment is modified by publication.
+- Keep personal conversations, learned experience, model checkpoints, credentials and site-specific configuration outside Git.
+
 # Журнал изменений DeepBrain
 
 ## 1.4.0

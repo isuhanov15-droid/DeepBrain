@@ -371,3 +371,27 @@ FodyWeavers.xsd
 /brainconfig-v1.4-live.json
 /src/DeepBrain.Host/habits-v1.3.0-snapshot.json
 /Trace/
+
+# Private runtime state and credentials; source-only GitHub publication
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.pem
+*.key
+password.txt
+authorized_keys
+known_hosts
+station-output.json
+alice.json
+openai.json
+dialogue.json
+connection.json
+*api-key*
+*private-key*
+/deepbrain-web-data/
+/deepbrain-runtime/
+/recovery/

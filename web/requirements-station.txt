@@ -1,0 +1,2 @@
+websocket-client==1.9.2
+segno==1.6.6
