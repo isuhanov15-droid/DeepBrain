@@ -8,7 +8,12 @@ using DeepBrain.Shared.BrainDtos.V6;
 
 namespace DeepBrain.Host.BrainLife;
 
-public sealed record ConversationInput(long Sequence, string RequestId, DateTimeOffset At, string Message, bool Historical);
+public sealed record ConversationInput(long Sequence, string RequestId, DateTimeOffset At, string Message, bool Historical)
+{
+    // Omit absent data so schema-1 journal digests and schema-3 runtime hashes stay identical.
+    [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)]
+    public SemanticAppraisalDto? Semantic { get; init; }
+}
 public sealed record ConversationReceipt(long Sequence, string RequestId, string Status);
 
 /// <summary>Durable external observations, never instructions or fabricated action rewards.
@@ -43,13 +48,13 @@ public sealed class ConversationExperience
         if (!_enabled || !Directory.Exists(_directory)) return;
         foreach (var path in Directory.EnumerateFiles(_directory, "*.json").Order(StringComparer.Ordinal))
         {
-            if (new FileInfo(path).Length > 32_000) throw new InvalidDataException("Conversation observation too large");
+            if (new FileInfo(path).Length > 128_000) throw new InvalidDataException("Conversation observation too large");
             var stored = JsonSerializer.Deserialize<Stored>(File.ReadAllText(path), RuntimeCheckpoint.Json)
                 ?? throw new InvalidDataException("Empty conversation observation");
             Validate(stored.Input);
-            if (stored.SchemaVersion != 1 || Path.GetFileName(path) != FileName(stored.Input.Sequence) ||
+            if (stored.SchemaVersion != (stored.Input.Semantic is null ? 1 : 2) || Path.GetFileName(path) != FileName(stored.Input.Sequence) ||
                 _entries.ContainsKey(stored.Input.Sequence) || !_ids.Add(stored.Input.RequestId) ||
-                JsonSerializer.Serialize(stored.Appraisal) != JsonSerializer.Serialize(Appraise(stored.Input.Message)))
+                JsonSerializer.Serialize(stored.Appraisal) != JsonSerializer.Serialize(Resolve(stored.Input)))
                 throw new InvalidDataException("Invalid conversation observation");
             _entries.Add(stored.Input.Sequence, stored);
         }
@@ -61,6 +66,14 @@ public sealed class ConversationExperience
             !Regex.IsMatch(input.RequestId, "^[a-f0-9]{32}$") || string.IsNullOrWhiteSpace(input.Message) ||
             input.Message.Length > 8000 || input.At < DateTimeOffset.UnixEpoch)
             throw new ArgumentException("Invalid conversation observation");
+        if (input.Semantic is { } s && (s.Version!=1 || s.Source is not ("qwen" or "unavailable") ||
+            s.Model is not ("qwen3.5:9b-q4_K_M" or "qwen3.5:4b-q4_K_M" or "") ||
+            s.Source=="qwen" && s.Model=="" ||
+            s.Kind is not ("neutral" or "contact" or "warmth" or "joy" or "support" or "correction" or "tension" or "interest" or "relief" or "surprise" or "playful") ||
+            s.Irony is not ("none" or "possible" or "likely") ||
+            s.Target is not ("self" or "assistant" or "situation" or "third_party" or "unknown") ||
+            !double.IsFinite(s.Confidence) || s.Confidence<0 || s.Confidence>1))
+            throw new ArgumentException("Invalid semantic appraisal");
     }
     public ConversationReceipt Accept(ConversationInput input)
     {
@@ -76,7 +89,7 @@ public sealed class ConversationExperience
             }
             if (_ids.Contains(input.RequestId) || _entries.Count > 0 && input.Sequence <= _entries.Keys.Last())
                 throw new InvalidOperationException("Conversation order conflict");
-            var stored = new Stored(1,input,_now(),Appraise(input.Message));
+            var stored = new Stored(input.Semantic is null ? 1 : 2,input,_now(),Resolve(input));
             var path = Path.Combine(_directory,FileName(input.Sequence));
             if (File.Exists(path)) throw new IOException("Conversation file unexpectedly exists");
             RuntimeCheckpoint.AtomicWrite(path,stored); // fsync before acknowledging; never rewrite an old observation.
@@ -101,8 +114,9 @@ public sealed class ConversationExperience
                 _state.Digest=Chain(_state.Digest,s);
                 _state.Kinds[s.Appraisal.Kind]=_state.Kinds.GetValueOrDefault(s.Appraisal.Kind)+1;
                 var excerpt=input.Message.Length>180 ? input.Message[..180]+"…" : input.Message;
-                _state.Last=new(input.Sequence,input.RequestId,input.At,s.Appraisal.Kind,s.Appraisal.Label,excerpt,!fresh);
-                if (!fresh) continue;
+                _state.Last=new(input.Sequence,input.RequestId,input.At,s.Appraisal.Kind,s.Appraisal.Label,excerpt,!fresh) { Semantic=input.Semantic };
+                if (!fresh || input.Semantic is { } semantic &&
+                    (semantic.Source!="qwen" || semantic.Ambiguous || semantic.Confidence<.6)) continue;
                 _state.EmotionalExchanges++; _state.LastEmotional=_state.Last;
                 // Repetition cannot escalate beyond the same bounded contribution.
                 foreach(var key in _state.Influence.Keys.ToArray())
@@ -152,6 +166,29 @@ public sealed class ConversationExperience
     }
     private static string Chain(string prior,Stored value) => Convert.ToHexString(SHA256.HashData(
         Encoding.UTF8.GetBytes(prior+JsonSerializer.Serialize(value,RuntimeCheckpoint.Json))));
+    private static Appraisal Resolve(ConversationInput input)
+    {
+        if (input.Semantic is not { } s) return Appraise(input.Message); // Immutable legacy appraisal contract.
+        if (s.Source!="qwen" || s.Ambiguous || s.Confidence<.6)
+            return Make("uncertain","Смысл неоднозначен: оценка сохранена без изменения эмоций",0);
+        var appraisal=s.Kind switch
+        {
+            "warmth" => Make("warmth","Тёплое обращение по смыслу разговора",.8,("joy",.8),("affection",1)),
+            "joy" => Make("joy","Собеседник поделился радостью",.9,("joy",1),("affection",.6)),
+            "support" => Make("support","По контексту собеседнику нужна поддержка",-.5,("sadness",.65),("affection",.5)),
+            "correction" => Make("correction","Обратная связь о неудачном ответе",-.15,("curiosity",.55),("frustration",.2)),
+            "tension" => Make("tension","В разговоре слышится недовольство или напряжение",-.35,("calm",.4),("affection",.35),("frustration",.2)),
+            "interest" => Make("interest","Интерес к теме разговора",.2,("curiosity",.75),("affection",.25)),
+            "relief" => Make("relief","В разговоре появилось облегчение",.5,("relief",.8),("calm",.5)),
+            "surprise" => Make("surprise","Собеседник выражает удивление",.1,("surprise",.7),("curiosity",.4)),
+            "playful" => Make("playful","Доброжелательная шутка в контексте разговора",.4,("joy",.5),("affection",.6)),
+            "neutral" => Make("neutral","Нейтральное сообщение по смыслу",0),
+            _ => Make("contact","Спокойное общение",.1,("affection",.25),("calm",.15))
+        };
+        var label=appraisal.Label+(s.Irony=="likely" ? "; вероятна ирония" : s.Irony=="possible" ? "; возможна ирония" : "");
+        var weight=s.Confidence*(s.Irony=="possible" ? .6 : 1);
+        return new(appraisal.Kind,label,appraisal.Valence*weight,appraisal.Emotions.ToDictionary(p=>p.Key,p=>p.Value*weight));
+    }
     private static Appraisal Appraise(string original)
     {
         // Deliberately conservative, inspectable Russian cues. Quotes and imagined examples

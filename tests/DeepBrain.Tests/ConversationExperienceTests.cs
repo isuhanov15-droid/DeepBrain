@@ -6,7 +6,7 @@ using Xunit;
 
 namespace DeepBrain.Tests;
 
-public sealed class ConversationExperienceTests : IDisposable
+public sealed partial class ConversationExperienceTests : IDisposable
 {
     private readonly string _dir=Path.Combine(Path.GetTempPath(),"deepbrain-social-"+Guid.NewGuid().ToString("N"));
     private readonly DateTimeOffset _now=DateTimeOffset.UtcNow;
