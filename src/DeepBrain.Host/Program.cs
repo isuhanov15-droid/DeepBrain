@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.IO;
 using DeepBrain.Host.Brain;
 using DeepBrain.Host.Brain.Input;
@@ -89,7 +89,8 @@ var externalApi = new ExternalApiServer(
     () => lifeLoop?.GetMlStatus() ?? "ML недоступен",
     () => lifeLoop?.GetMemoryStatus() ?? "Память недоступна",
     () => lifeLoop?.GetHabitStatus() ?? "Привычки недоступны",
-    msg => LogLine(consoleLock, logBuffer, logWriter, msg));
+    msg => LogLine(consoleLock, logBuffer, logWriter, msg),
+    observation => lifeLoop?.AcceptConversation(observation) ?? throw new InvalidOperationException("Core unavailable"));
 var mlCoreAvailable = DeepBrain.Host.BrainLife.Ml.MlCoreAvailability.IsAvailable;
 LogLine(consoleLock, logBuffer, logWriter,
     mlCoreAvailable

@@ -44,6 +44,8 @@ public sealed partial class LifeLoop
     private readonly PlanEngine _plan = new();
     private readonly ExecutivePlanner _executive;
     private readonly CognitiveDynamics _cognition;
+    private readonly ConversationExperience _conversation;
+    public ConversationReceipt AcceptConversation(ConversationInput input) => _conversation.Accept(input);
     private readonly AttentionEngine _attention = new();
     private readonly AttentionInertiaEngine _attentionInertia = new();
     private readonly SemanticMemory _semantic = new();
@@ -175,6 +177,9 @@ public sealed partial class LifeLoop
         _executive.Configure(cfg.Planning ?? PlanningConfig.Default);
         _cognition = new CognitiveDynamics(_log);
         _cognition.Configure(cfg.CognitiveDynamics ?? CognitiveDynamicsConfig.Default);
+        _conversation = new ConversationExperience(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(
+            (cfg.CognitiveDynamics ?? CognitiveDynamicsConfig.Default).Path))!, "dialogue-experience"),
+            cfg.Continuity?.Enable == true && cfg.CognitiveDynamics?.Enable == true);
         _habits = new HabitSystem(_log);
         _habits.Configure(cfg.Habits ?? HabitConfig.Default);
         _longTermMemory = new PersistentEpisodicMemory(_log);
@@ -660,6 +665,7 @@ public sealed partial class LifeLoop
             catch (Exception ex) { _log("ML checkpoint save failed: " + ex.Message); }
         }
 
+        _conversation.Advance(dtSeconds);
         _clock.Tick(dtSeconds, _sleep.IsSleeping);
         _sleep.Update(_clock, ref _homeo, ref _affect);
         if (_sleep.EnteredSleep || _sleep.WokeUp) _cortexContextEpoch++;
@@ -679,7 +685,7 @@ public sealed partial class LifeLoop
                     _world.Novelty, SocialContactResponder.HasPending(_world.Events), true));
             _cognition.Begin(new CognitiveObservation(_scenarioName,_homeo,_world.Novelty,0,
                 Math.Clamp(_world.Threat,0,1),0,Math.Clamp(_loop.LoopStrength,0,1),false,true),
-                Array.Empty<WorldEventDto>(),_executive.Snapshot());
+                Array.Empty<WorldEventDto>(),_executive.Snapshot(),_conversation.Snapshot());
             if (!_sleepConsolidated)
             {
                 var sums = _memory.Consolidate();
@@ -755,7 +761,7 @@ public sealed partial class LifeLoop
                 new CurriculumStateDto(_curriculumMode, _scenarioIndex),
                 new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
                 new LoopInfoDto(_loop.IsInLoop, _loop.LoopObservedCount, _loop.LoopObservedCount, _loop.LoopStrength, 0.0, NormalizeLoopType(_loop.LoopType), _loop.Streak)
-            ) { Foresight = _foresight.Enabled ? _foresight.Snapshot() : null, Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
+            ) { Foresight = _foresight.Enabled ? _foresight.Snapshot() : null, Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot(), Conversation = _conversation.Snapshot() };
             EmitTrace("tick", $"тик={_tick} эпизод={_episode.EpisodeId} действие=сон награда=0.000 петля=нет ε=0.000", ct);
             _broadcast(stateSleep, ct);
             _tick++;
@@ -797,6 +803,7 @@ public sealed partial class LifeLoop
         if (_loopBreakTicks > 0 && attention.Focus1 == "threat")
             attention = attention with { Focus1 = "novelty", Reason = "loop_break" };
         var computedAffect = _emotion.Compute(instincts, _homeo, _world.CalmLevel, _world.StressLevel, attention, recentEvents, config.Mood, appraisal);
+        computedAffect = _conversation.Blend(computedAffect, _homeo);
         var (inertAffect, moodInertia) = _inertia.Apply(_affect, computedAffect, instincts.SelfPreservation);
         _affect = inertAffect;
         _personality.ApplyBaselines(ref _affect, ref instincts);
@@ -806,7 +813,7 @@ public sealed partial class LifeLoop
         var cognitiveBefore = new CognitiveObservation(_scenarioName,_homeo,_world.Novelty,
             LifeMath.Clamp01(_instincts.Compute(_homeo,_world,config.Drives).Agency-_agencyOffset),
             appraisal.Threat,appraisal.Social,Math.Clamp(_loop.LoopStrength,0,1),hasPendingSocialSignal);
-        _cognition.Begin(cognitiveBefore,newEvents,_executive.Snapshot());
+        _cognition.Begin(cognitiveBefore,newEvents,_executive.Snapshot(),_conversation.Snapshot());
 
         var dominantDrive = _driveResolver.Resolve(instincts);
         var goals = _goals.Resolve(_homeo, instincts, dominantDrive, circ.Phase);
@@ -1202,7 +1209,7 @@ public sealed partial class LifeLoop
             new CurriculumStateDto(_curriculumMode, _scenarioIndex),
             new TickInfoDto(_tick, _episode.EpisodeTick, dtSeconds),
             loopInfo
-        ) { Foresight = _foresight.Enabled ? _foresight.Snapshot() : null, Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot() };
+        ) { Foresight = _foresight.Enabled ? _foresight.Snapshot() : null, Continuity = ContinuityStatus(), CortexContextId = CortexContextId, Executive = _executive.Snapshot(), Cognition = _cognition.Snapshot(), Conversation = _conversation.Snapshot() };
         EmitTrace("tick",
             $"тик={_tick} эпизод={_episode.EpisodeId} " +
             $"действие={RussianDisplay.Token(action.Name)} награда={rewardDto.Total:0.000} " +

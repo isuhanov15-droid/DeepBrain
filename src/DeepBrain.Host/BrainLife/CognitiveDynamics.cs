@@ -55,7 +55,7 @@ public sealed partial class CognitiveDynamics
         }
     }
 
-    public void Begin(CognitiveObservation observation, IReadOnlyList<WorldEventDto> newEvents, ExecutiveStateDto? executive)
+    public void Begin(CognitiveObservation observation, IReadOnlyList<WorldEventDto> newEvents, ExecutiveStateDto? executive, ConversationExperienceDto? conversation = null)
     {
         lock (_gate)
         {
@@ -82,6 +82,8 @@ public sealed partial class CognitiveDynamics
             var memoryNovelty = _state.Memory.Where(x => x.Key == "event:novelty_opportunity")
                 .Select(x => x.Salience * (1 - (double)(_state.Clock - x.Clock) / _config.WorkingMemoryTtlTicks)).DefaultIfEmpty(0).Max();
             var safe = observation.Body.Safety >= .5 && observation.Body.Pain < .4;
+            if (conversation?.LastEmotional is { } contact && conversation.EmotionInfluence.Values.Max() > .04)
+                Remember("conversation:"+contact.RequestId,"conversation",contact.Label,.75);
             var targets = new (string Id, double Value, string Evidence)[]
             {
                 ("calm", (1-observation.Threat)*(1-observation.Body.Arousal)*observation.Body.Safety, "Безопасность и невысокое возбуждение"),
@@ -97,8 +99,10 @@ public sealed partial class CognitiveDynamics
             };
             _signals = targets.Select(t =>
             {
-                var value = Math.Clamp(_state.Emotions[t.Id] + _config.EmotionResponse*(Math.Clamp(t.Value, 0, 1)-_state.Emotions[t.Id]), 0, 1);
-                _state.Emotions[t.Id] = value; return new EmotionSignalDto(t.Id, value, t.Evidence);
+                var social = conversation?.EmotionInfluence.GetValueOrDefault(t.Id) ?? 0;
+                var value = Math.Clamp(_state.Emotions[t.Id] + _config.EmotionResponse*(Math.Clamp(t.Value + social, 0, 1)-_state.Emotions[t.Id]), 0, 1);
+                var evidence = social > .01 ? t.Evidence + "; общение: " + conversation!.LastEmotional?.Label : t.Evidence;
+                _state.Emotions[t.Id] = value; return new EmotionSignalDto(t.Id, value, evidence);
             }).ToArray();
             TrimMemory(); MaybeFlush();
         }

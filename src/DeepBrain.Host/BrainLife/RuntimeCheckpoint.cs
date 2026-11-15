@@ -10,7 +10,7 @@ internal sealed class RuntimeCheckpoint
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { WriteIndented = false, MaxDepth = 64 };
-    [JsonRequired] public int SchemaVersion { get; set; } = 2;
+    [JsonRequired] public int SchemaVersion { get; set; } = 3;
     [JsonRequired] public string Id { get; set; } = "";
     [JsonRequired] public DateTimeOffset SavedAt { get; set; }
     [JsonRequired] public string ConfigHash { get; set; } = "";
@@ -74,9 +74,10 @@ internal sealed class RuntimeCheckpoint
         // still has to match the old boundary exactly.
         var configMatches = snapshot.ConfigHash == ConfigurationHash(config) ||
             snapshot.SchemaVersion == 1 && snapshot.ConfigHash == ConfigurationHash(config with { Foresight = null });
-        if (snapshot.SchemaVersion is not (1 or 2) || !Guid.TryParseExact(snapshot.Id, "N", out _) ||
+        if (snapshot.SchemaVersion is not (1 or 2 or 3) || !Guid.TryParseExact(snapshot.Id, "N", out _) ||
             snapshot.Components is null || snapshot.Files is null ||
             snapshot.SchemaVersion == 1 && snapshot.Components.ContainsKey("foresight") ||
+            snapshot.SchemaVersion < 3 && snapshot.Components.ContainsKey("conversation") ||
             !configMatches || snapshot.StateHash != HashState(snapshot.Components))
             throw new InvalidDataException("Runtime checkpoint is incompatible or damaged. Existing experience has not been changed.");
         var current = CaptureFiles(config);

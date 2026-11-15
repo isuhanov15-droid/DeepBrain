@@ -50,6 +50,8 @@ public sealed record LifeStateDto(
     public ExecutiveStateDto? Executive { get; init; }
     [JsonPropertyName("cognition")]
     public CognitiveDynamicsDto? Cognition { get; init; }
+    [JsonPropertyName("conversation")]
+    public ConversationExperienceDto? Conversation { get; init; }
     [JsonPropertyName("foresight")]
     public ForesightDto? Foresight { get; init; }
 }

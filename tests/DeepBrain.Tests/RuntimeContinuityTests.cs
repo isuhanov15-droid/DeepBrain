@@ -8,7 +8,7 @@ using Xunit;
 
 namespace DeepBrain.Tests;
 
-public sealed class RuntimeContinuityTests : IDisposable
+public sealed partial class RuntimeContinuityTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "deepbrain-continuity-" + Guid.NewGuid().ToString("N"));
     public RuntimeContinuityTests() => Directory.CreateDirectory(_directory);
@@ -98,21 +98,23 @@ public sealed class RuntimeContinuityTests : IDisposable
     public void Version19CheckpointMigratesWithoutChangingExistingRuntimeOrExperience()
     {
         var first = NewLoop(); Tick(first.Loop, 85); first.Loop.FlushPersistentState();
-        var old = RuntimeState(first.Loop);
+        var old = JsonNode.Parse(RuntimeState(first.Loop))!.AsObject(); old.Remove("conversation");
         var json = JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json")))!;
         json["schemaVersion"] = 1; // v1.9's same component/config contract, without foresight.
+        RemoveConversationFromLegacy(json);
         System.IO.File.WriteAllText(FilePath("runtime.json"), json.ToJsonString());
         var backup = Backup();
         var config = Config with { Foresight = new(true) };
         var restored = NewLoop(config);
         var actual = JsonNode.Parse(RuntimeState(restored.Loop))!.AsObject();
         Assert.True(actual.Remove("foresight"));
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(old),actual));
+        Assert.True(actual.Remove("conversation"));
+        Assert.True(JsonNode.DeepEquals(old,actual));
         foreach(var file in backup.Where(p => !p.Key.EndsWith("config.json")))
             Assert.Equal(file.Value,System.IO.File.ReadAllBytes(file.Key));
         Tick(restored.Loop, 5); restored.Loop.FlushPersistentState();
         var upgraded = JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json")))!;
-        Assert.Equal(2, upgraded["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(3, upgraded["schemaVersion"]!.GetValue<int>());
         Assert.NotNull(upgraded["components"]!["foresight"]);
         var again = NewLoop(config);
         Assert.Equal(RuntimeState(restored.Loop),RuntimeState(again.Loop));
@@ -123,6 +125,7 @@ public sealed class RuntimeContinuityTests : IDisposable
     {
         var run=NewLoop();Tick(run.Loop,10);run.Loop.FlushPersistentState();
         var json=JsonNode.Parse(System.IO.File.ReadAllText(FilePath("runtime.json")))!;json["schemaVersion"]=1;
+        RemoveConversationFromLegacy(json);
         System.IO.File.WriteAllText(FilePath("runtime.json"),json.ToJsonString());
         var backup=Backup();
         Assert.Throws<InvalidDataException>(()=>NewLoop(Config with { Foresight=new(true), TickRate=10 }));

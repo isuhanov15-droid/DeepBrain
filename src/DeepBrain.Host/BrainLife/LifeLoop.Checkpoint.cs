@@ -43,6 +43,7 @@ public sealed partial class LifeLoop
             ["moodStats"] = (_moodStats.CaptureRuntimeState, _moodStats.RestoreRuntimeState),
             ["executive"] = (_executive.CaptureRuntimeState, _executive.RestoreRuntimeState),
             ["cognition"] = (_cognition.CaptureRuntimeState, _cognition.RestoreRuntimeState),
+            ["conversation"] = (_conversation.CaptureRuntimeState, _conversation.RestoreRuntimeState),
             ["habits"] = (_habits.CaptureRuntimeState, _habits.RestoreRuntimeState),
             ["longTermMemory"] = (_longTermMemory.CaptureRuntimeState, _longTermMemory.RestoreRuntimeState)
         };
@@ -65,9 +66,9 @@ public sealed partial class LifeLoop
         if (_ml is MlPolicyAdvisor advisor) advisor.EnableContinuityRandom();
         if (checkpoint is null) return;
         var components = RuntimeComponents();
-        var restoredComponents = checkpoint.SchemaVersion == 1
-            ? components.Where(c => c.Key != "foresight").ToDictionary(c => c.Key,c => c.Value)
-            : components;
+        var restoredComponents = components.Where(c =>
+            (checkpoint.SchemaVersion >= 2 || c.Key != "foresight") &&
+            (checkpoint.SchemaVersion >= 3 || c.Key != "conversation")).ToDictionary(c=>c.Key,c=>c.Value);
         if (!restoredComponents.Keys.Order().SequenceEqual(checkpoint.Components.Keys.Order()))
             throw new InvalidDataException("Incomplete runtime component set");
         foreach (var component in restoredComponents)
@@ -99,7 +100,7 @@ public sealed partial class LifeLoop
         RuntimeCheckpoint.AtomicWrite(config.Continuity.Path + ".restore.json", new
         {
             checkpointId = checkpoint.Id, runId = _runId, restoredAt = DateTimeOffset.UtcNow,
-            sourceSchemaVersion = checkpoint.SchemaVersion, migratedToSchemaVersion = 2,
+            sourceSchemaVersion = checkpoint.SchemaVersion, migratedToSchemaVersion = 3,
             expectedStateHash = checkpoint.StateHash, restoredStateHash = restoredHash,
             nextTick = _tick, episodeId = _episode.EpisodeId, episodeTick = _episode.EpisodeTick,
             homeostasis = _homeo, affect = _affect, circadian = _clock.Snapshot(_sleep.IsSleeping),

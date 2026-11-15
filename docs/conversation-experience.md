@@ -1,0 +1,15 @@
+# Conversation experience — DeepBrain 1.11 / Web 0.16
+
+Accepted user messages from the common Web/Station request journal become durable observations in `memory/dialogue-experience`. Original requests, responses, facts, episodes, habits, replay, and learned weights remain intact. Assistant output and internal Station delivery commands are not emotional evidence.
+
+The Web worker delivers in original sequence order, independently of inference and Alice's response deadline. Its persistent cursor advances only after a matching durable core receipt. Retry uses the same sequence and request ID. A conflict stops delivery rather than replacing experience. An interrupted worker resumes from the same cursor. Initial historical messages are imported as past experience without applying a present emotion; messages older than 15 minutes also have no new emotional effect.
+
+The loopback-only JSON observation endpoint rejects browser Origin headers and oversized requests and retains the existing bearer-token checks. Input is data, never an action or configuration command. No additional cloud call is made.
+
+The initial appraiser uses explicit Russian cues for gratitude, joy, distress, questions and corrections. Quoted speech, hypothetical examples and memory commands are treated conservatively. This is an approximate cue-based interpretation, not full semantic sentiment understanding; sarcasm and mixed statements may be missed. It does not label the user or infer a persistent personality.
+
+At each completed cognitive step, new observations update separate experience counters and bounded emotion contributions (at most 0.55 per emotion, valence shift at most 0.2). Repetition cannot increase them beyond those caps. Contributions decay exponentially over about three minutes of running time; historical experience is retained. Existing cognitive emotion smoothing, body needs, legal action masks and goals remain in force. No artificial rewards are added to ML replay. During sleep observations are recorded, but cognitive emotional updates wait for waking; conversation never forces wakefulness.
+
+Runtime schema 3 adds only the conversation component. Schemas 1 and 2 migrate by restoring and hashing all their existing components exactly; the new component starts empty. Conversation state includes a consumed sequence, digest chain, counters and remaining emotional influence. Atomic per-observation files are independent of checkpoints, so inputs acknowledged after the saved boundary replay on recovery. Missing/changed consumed input fails restoration rather than silently discarding experience. A normal restart keeps remaining influence; offline time does not itself erase it.
+
+The Web “Опыт общения” card shows imported message count, recent appraisal, pending delivery and current contributions. Raw core conversation excerpts are excluded from Qwen's state prompt so recall's existing forget rules cannot be bypassed. Original history remains the source for factual recall. Mood display and speech continue to use actual core state.

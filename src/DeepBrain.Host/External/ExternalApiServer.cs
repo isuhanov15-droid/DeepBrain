@@ -25,6 +25,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
     private readonly Func<string> _memoryStatusProvider;
     private readonly Func<string> _habitsStatusProvider;
     private readonly Action<string> _log;
+    private readonly Func<ConversationInput, ConversationReceipt>? _conversation;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
     private HttpListener? _listener;
@@ -41,7 +42,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
         Func<string> mlStatusProvider,
         Func<string> memoryStatusProvider,
         Func<string> habitsStatusProvider,
-        Action<string> log)
+        Action<string> log, Func<ConversationInput, ConversationReceipt>? conversation = null)
     {
         _configProvider = configProvider;
         _events = events;
@@ -50,6 +51,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
         _memoryStatusProvider = memoryStatusProvider;
         _habitsStatusProvider = habitsStatusProvider;
         _log = log;
+        _conversation = conversation;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -291,6 +293,7 @@ public sealed class ExternalApiServer : IAsyncDisposable
                     "GET /api/v1/llm/last",
                     "GET /api/v1/llm/journal",
                     "POST /api/v1/llm/observe",
+                    "POST /api/v1/conversation/observe (loopback only)",
                     "GET /api/v1/events"
                 },
                 transports = new[] { "http", "sse" },
@@ -358,6 +361,36 @@ public sealed class ExternalApiServer : IAsyncDisposable
                 queued ? HttpStatusCode.Accepted : HttpStatusCode.Conflict,
                 new { queued, frameId, status = _cortex.GetStatus() },
                 cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (path == "/api/v1/conversation/observe" && IsMethod(context, "POST"))
+        {
+            // Server-to-server input only. Reject browser requests even when ordinary
+            // loopback telemetry does not require a bearer token.
+            var request = context.Request;
+            if (request.RemoteEndPoint is null || !IPAddress.IsLoopback(request.RemoteEndPoint.Address) ||
+                request.Headers["Origin"] is not null ||
+                request.ContentType?.Split(';')[0].Trim() != "application/json" ||
+                request.ContentLength64 is < 1 or > 32000 || _conversation is null)
+            {
+                await WriteJsonAsync(context.Response,HttpStatusCode.BadRequest,new { error="invalid_observation" },cancellationToken);
+                return;
+            }
+            using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(3));
+            try
+            {
+                var input=await JsonSerializer.DeserializeAsync<ConversationInput>(request.InputStream,_jsonOptions,deadline.Token)
+                    ?? throw new ArgumentException("Empty observation");
+                var receipt=_conversation(input);
+                await WriteJsonAsync(context.Response,HttpStatusCode.OK,receipt,cancellationToken);
+            }
+            catch(Exception ex) when(ex is JsonException or ArgumentException or InvalidOperationException)
+            {
+                await WriteJsonAsync(context.Response,ex is InvalidOperationException ? HttpStatusCode.Conflict : HttpStatusCode.BadRequest,
+                    new { error="invalid_observation" },cancellationToken);
+            }
             return;
         }
 
