@@ -1,3 +1,9 @@
+# Web 0.17.1 — restore «Глубокий разум»
+
+- Restore the skill name, greeting, Qwen identity and Web labels to «Глубокий разум».
+- Retain old conversation contents, memories, emotional appraisals, account binding and internal delivery compatibility.
+- Launch with «Алиса, запусти навык Глубокий разум»; no separate assistant name is required inside the conversation.
+
 # DeepBrain 1.12 / Web 0.17 — source publication
 
 - Publish the existing 1.4→1.12 implementation history: goal planning, working memory, emotions, strategy learning, deferred intentions, complete state restoration, foresight, conversation experience and Qwen semantic appraisal.

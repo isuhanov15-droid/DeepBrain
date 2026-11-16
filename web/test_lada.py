@@ -21,7 +21,7 @@ class MemoryTests(unittest.TestCase):
         return self.d.send(uuid.uuid4().hex,self.d.view()['conversationId'],text)
     def prompt(self):return [c[2] for c in self.calls if c[1]=='/api/chat'][-1]['messages']
     def test_explicit_fact_survives_restart_new_conversation_and_fallback_budget(self):
-        result=self.ask('Лада, запомни: кодовое имя проекта Сапфир — Тихая река.')
+        result=self.ask('Глубокий разум, запомни: кодовое имя проекта Сапфир — Тихая река.')
         self.assertIn('Запомнила',result['answer'])
         self.assertFalse(any(c[1]=='/api/chat' for c in self.calls))
         self.d=self.create();self.d.new_conversation()
@@ -72,8 +72,8 @@ class LadaVoiceTests(unittest.TestCase):
     pair=voice_fixtures.AliceTests.pair
     def test_launch_and_name_do_not_create_fake_questions(self):
         self.pair()
-        for text in ('Алиса, включи Ладу!','Запусти навык Лада','Лада','Лада, помощь'):
-            self.assertIn('Лада',self.a.handle(self.request(text))['response']['text'])
+        for text in ('Алиса, включи Ладу!','Запусти навык Лада','Лада','Лада, помощь','Алиса, запусти навык Глубокий разум','Глубокий разум','Глубокий разум, помощь'):
+            self.assertIn('Глубокий разум',self.a.handle(self.request(text))['response']['text'])
         with self.a.connect() as c:self.assertEqual(0,c.execute('SELECT count(*) FROM jobs').fetchone()[0])
         self.assertTrue(self.a.handle(self.request('Лада, хватит'))['response']['end_session'])
     def test_new_name_delivery_is_still_internal_protocol(self):

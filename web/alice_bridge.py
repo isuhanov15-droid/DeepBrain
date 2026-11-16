@@ -10,7 +10,7 @@ from station_face import StationFace
 from lada_face import FACES,gif
 
 WAIT='Готовлю ответ. Скажи «Готово?» через несколько секунд. На резервной модели ожидание может занять несколько минут.'
-HELP='Я Лада, помощница DeepBrain. Помню наши разговоры. Задай вопрос. Для следующей части скажи «Продолжить», для повторения — «Повтори».'
+HELP='Вы в навыке «Глубокий разум». Помню наши разговоры. Задавай вопросы без дополнительного обращения. Для следующей части скажи «Продолжить», для повторения — «Повтори».'
 
 def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 
@@ -198,7 +198,7 @@ class AliceBridge:
                 with self.connect() as c:self.delivery.cancel(c)
                 result=self.response('До встречи. Переписка сохранена.',True)
             elif not command or is_launch(command) or normal in ('','помощь','что ты умеешь'):
-                result=self.response('Я Лада. Рада продолжить наш разговор. О чём поговорим?' if self.delivery.available() else HELP)
+                result=self.response('Вы в навыке «Глубокий разум». Рада продолжить наш разговор. О чём поговорим?' if self.delivery.available() else HELP)
             elif delivery_command(command)[0]:
                 # original_utterance sometimes retains the whole skill-launch
                 # phrase even though request.command has already stripped it.

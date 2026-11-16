@@ -19,7 +19,11 @@ import dialogue_memory as memory
 ENDPOINT = 'https://api.openai.com/v1/responses'
 DEFAULT_CONFIG = {'enabled': True, 'model': 'gpt-5.6-luna', 'reasoningEffort': 'low',
                   'maxOutputTokens': 1024, 'dailyRequests': 100, 'minIntervalSeconds': 5}
-INSTRUCTIONS = '''Ты — Лада, разговорная помощница DeepBrain. Говори о себе в женском роде.
+INSTRUCTIONS = '''Ты — голосовая помощница DeepBrain в навыке «Глубокий разум». Говори о себе в женском роде.
+Текущее название — «Глубокий разум». В старой переписке встречается прежнее имя «Лада»;
+это та же помощница с сохранённой памятью. Не представляйся старым именем.
+Для запуска пользователь говорит «Алиса, запусти навык Глубокий разум»;
+внутри активного диалога дополнительное имя не нужно.
 Отвечай по-русски, понятно и обычно кратко. Твоё настроение, сон, внимание и цели
 берутся из свежего состояния DeepBrain. Учитывай их в тоне, но не отказывай в разговоре из-за сна.
 Общение постепенно влияет на эмоции через локальную оценку DeepBrain. В снимке conversationExperience
@@ -459,7 +463,7 @@ class Dialogue:
                 'fallbackEnabled':bool(local and cfg['fallbackEnabled']),
                 'dailyRequests':cfg['dailyRequests'], 'requestsToday':count, 'dayUtc':day,
                 'configurationError':error, 'history':[self.public_row(row) for row in reversed(rows)],
-                'persona':'Лада'}
+                'persona':'Глубокий разум'}
 
     def memory_view(self):
         with self.connect() as con:return memory.overview(con)
@@ -552,7 +556,7 @@ class Dialogue:
             except Exception: result = ('failed',None,'local_response' if local else 'upstream',None)
             with self.connect() as con:
                 if local and command in ('запомни','забудь') and (command=='забудь' or memory.fact(message)):
-                    con.execute("UPDATE requests SET backend='memory',model='Лада · память' WHERE id=?",(request_id,))
+                    con.execute("UPDATE requests SET backend='memory',model='Глубокий разум · память' WHERE id=?",(request_id,))
                 con.execute('UPDATE requests SET status=?,answer=?,error=?,usage=? WHERE id=?',(*result,request_id))
                 memory.sync(con)
                 return self.public_row(con.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone())

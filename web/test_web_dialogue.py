@@ -102,7 +102,7 @@ class WebDialogueTests(unittest.TestCase):
         self.assertEqual(200,status);self.assertEqual([],json.loads(body)['history']);self.assertEqual(1,self.calls)
     def test_page_contains_dialogue_and_escapes_model_text_in_javascript(self):
         status,body,_=self.request('/');self.assertEqual(200,status)
-        self.assertIn('Диалог с Ладой',body.decode());self.assertIn('Web Studio 0.17',body.decode())
+        self.assertIn('Диалог · Глубокий разум',body.decode());self.assertIn('Web Studio 0.17.1',body.decode())
         _,body,_=self.request('/app.js');self.assertIn("esc(r.status==='completed'?r.answer",body.decode())
 
 

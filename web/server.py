@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DeepBrain Web 0.17. Explicit local or OpenAI dialogue; conversation observations are delivered locally."""
+"""DeepBrain Web 0.17.1. Explicit local or OpenAI dialogue; conversation observations are delivered locally."""
 import argparse,base64,hashlib,hmac,json,os,secrets,sqlite3,threading,time,urllib.request,urllib.error
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -61,7 +61,7 @@ class Studio:
        c.execute('DELETE FROM samples WHERE at<?',(now-7*86400,))
      except Exception as ex:errors['history']=str(ex)
      last_store=now
-   out.update(epoch=self.epoch,errors=errors,collectedAt=now,lastTickAt=last_tick_at,csrf=self.csrf,version='0.17.0')
+   out.update(epoch=self.epoch,errors=errors,collectedAt=now,lastTickAt=last_tick_at,csrf=self.csrf,version='0.17.1')
    with self.lock:self.snapshot=out
    self.stop.wait(5)
  def history(self,seconds=86400):
@@ -169,7 +169,7 @@ def main():
  s.conversation.start()
  s.alice.start();threading.Thread(target=voice.serve_forever,daemon=True).start()
  threading.Thread(target=s.collect,daemon=True).start()
- print('DeepBrain Web 0.17 on port',a.port,flush=True)
+ print('DeepBrain Web 0.17.1 on port',a.port,flush=True)
  try:http.serve_forever()
  except KeyboardInterrupt:pass
  finally:

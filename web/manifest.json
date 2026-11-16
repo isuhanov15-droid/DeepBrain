@@ -1,12 +1,12 @@
 {
-  "server.py": "b362ce24f3bf6bbfe942b7bd88e5311aca47bcc902ac9037373ccee7cdefc038",
+  "server.py": "22b534ee2ae28333cd1321378a95e831fd335c4672ad86c59f190c79286a41b8",
   "start.py": "250b2506339f8e9b7189b6848edc4ca51de541ad50ec818ef53492cbfe5f67de",
-  "dist/index.html": "6657801b9c998ae6859086db66701830f481dbd8e7255ca82f5a9a1f2aef11f3",
-  "dist/app.js": "1cef6d7d4419ddcb5285a85d2393d435bd17e8a70760e17da6abadb8dca5b4d1",
+  "dist/index.html": "0b9d1af2eb3f9dbdd10eefc4cc5ee339299a34eb2f58d3186cc29449077f2a6d",
+  "dist/app.js": "02b70d5a49befe355e44d2b5fcc24d1673484969b17845bca5b545ead60f49f1",
   "dist/style.css": "991ecf97721f17d6701ec4baa487f6689c0df2c097c6191059fa4592d569a21f",
-  "openai_dialogue.py": "f916156cb189fc9b456c0a30e45408993f0e3bc5b57f368d59033f478bf0b163",
+  "openai_dialogue.py": "52d325df6affe3500e3d6fdce4430fb99df3eb59180af27ff14e227dbb50dd0b",
   "setup_openai.py": "4ea5f29fcb99c4dfc66939a524d39878db012dec23195d7fc2e949c1162d6836",
-  "alice_bridge.py": "738dfbffe24add023c88cdf1bffbf4a2bab434fcf00fbac11219031b991330a8",
+  "alice_bridge.py": "377cba4241eef71d8745660b11d23113524d906bb1e177947695bb865429dcd4",
   "setup_alice.py": "972a90b0594a119fb90ea3619bd02be60501dd1e28597d5c821a100953d3bdff",
   "station_delivery.py": "70e2f4fb2126e82faa149edff6e4df7106b44a52fc59bb12e5ef7027193d5367",
   "station_transport.py": "3a9507ca3f6d4639f2a2d0b8cdfd5e2d05475ef4f2f6fe781a5ab2b56e267302",
@@ -14,9 +14,9 @@
   "station_qr.py": "8632b8aa627b9af90324405cbbfcdf2597e1cbfde93f13acc2161a8a5ce56cc9",
   "station_oauth.py": "8ea6c8a4a31a3032406d90e6f32d97ba440976344d870ec225308281e66f4de4",
   "voice_protocol.py": "33a400841b0e2690baf5ba514ca3581fcae9fab5c0006cb89fa0c1e17057e8c4",
-  "dialogue_memory.py": "1ea835347a2ebc9068d3d1e209224293cfd1faa670b2c53c56044ed070e4cfda",
+  "dialogue_memory.py": "ee63fc9b51688e314ebcc6641d161b7493283a8be51603396a94c8f52b703560",
   "lada_face.py": "1610a7338489a3713cc862ec5423a05a0728587eb6bc5408bb5b550fb264c63e",
   "station_face.py": "a9d3a75880714b56e5070f0e76a798aa865f4e58891a4c415bdbef938bc2cff5",
   "conversation_bridge.py": "e764bbb676009ec6c67d7b43d83c533869a5bfc1ce61e5df8f16b7a99a302331",
-  "semantic_appraisal.py": "0c4a7f34e0c54f785b843a62f53273d4a9c0092376284a1291bb8aaaf2cc56be"
+  "semantic_appraisal.py": "63dcae59a03e9c1f722414d0b24d590757ca56c0bfae8fbf25a779b8fbf78afa"
 }

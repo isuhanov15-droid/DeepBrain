@@ -37,12 +37,12 @@ def confirm_version():
   req.add_header('Authorization','Basic '+base64.b64encode(('ivan:'+password).encode()).decode())
   try:
    with urllib.request.urlopen(req,timeout=2) as r:data=json.load(r)
-   if data.get('version')=='0.17.0':
-    print('VERIFIED: running Web version 0.17.0',flush=True)
+   if data.get('version')=='0.17.1':
+    print('VERIFIED: running Web version 0.17.1',flush=True)
     return
   except OSError:pass
   time.sleep(.5)
- raise RuntimeError('Running Web did not confirm version 0.17.0')
+ raise RuntimeError('Running Web did not confirm version 0.17.1')
 def main():
  if not (target/'server.py').is_file() or not (target/'start.py').is_file():raise RuntimeError('Existing Web not found: '+str(target))
  if target==base:raise RuntimeError('Target must be existing Web folder, not update package')
@@ -59,7 +59,7 @@ def main():
  journal=status.get('llm',{}).get('journal',{}).get('path')
  if not status.get('api',{}).get('listening') or not journal or not Path(journal).is_absolute():raise RuntimeError('Live API has no valid journal path; update not started')
  if session():web_pane()
- backup=Path(tempfile.mkdtemp(prefix='deepbrain-web017-backup-',dir=target.parent))
+ backup=Path(tempfile.mkdtemp(prefix='deepbrain-web0171-backup-',dir=target.parent))
  for name in files:
   dest=backup/name;dest.parent.mkdir(parents=True,exist_ok=True)
   if (target/name).exists():shutil.copy2(target/name,dest)
@@ -67,7 +67,7 @@ def main():
  stop()
  try:
   for name in files:
-   dest=target/name;temporary=dest.with_name(dest.name+'.web017-new');shutil.copy2(base/name,temporary);os.replace(temporary,dest)
+   dest=target/name;temporary=dest.with_name(dest.name+'.web0171-new');shutil.copy2(base/name,temporary);os.replace(temporary,dest)
   subprocess.run([sys.executable,str(target/'start.py')],check=True)
   confirm_version()
  except Exception:
@@ -77,7 +77,7 @@ def main():
   print('Previous Web files restored. Trying to restart previous Web.',flush=True)
   subprocess.run([sys.executable,str(target/'start.py')])
   raise
- print('WEB 0.17 INSTALLED. Navigation, password, history and agent data preserved.',flush=True)
+ print('WEB 0.17.1 INSTALLED. Navigation, password, history and agent data preserved.',flush=True)
 if __name__=='__main__':
  try:main()
  except Exception as ex:print('STOP: '+str(ex),file=sys.stderr);sys.exit(1)
